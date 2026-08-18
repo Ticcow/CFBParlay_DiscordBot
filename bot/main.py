@@ -6,6 +6,7 @@ from discord.ext import commands
 from bot import db as db_module
 from bot.config import settings
 from bot.integrations.cfbd_client import CfbdClient
+from bot.integrations.odds_client import OddsClient
 from bot.parlays import repository
 
 logging.basicConfig(level=logging.INFO)
@@ -27,12 +28,12 @@ class DegenBot(commands.Bot):
         super().__init__(command_prefix="/", intents=intents)
         self.conn = db_module.connect(settings.database_path)
         db_module.run_migrations(self.conn)
-        self.cfbd = CfbdClient(
-            settings.cfbd_api_key,
-            log_usage=lambda service, endpoint: repository.log_api_usage(
-                self.conn, service, endpoint
-            ),
-        )
+
+        def log_usage(service: str, endpoint: str, credits_used: int = 1) -> None:
+            repository.log_api_usage(self.conn, service, endpoint, credits_used)
+
+        self.cfbd = CfbdClient(settings.cfbd_api_key, log_usage=log_usage)
+        self.odds = OddsClient(settings.odds_api_key, log_usage=log_usage)
 
     async def setup_hook(self):
         for extension in EXTENSIONS:

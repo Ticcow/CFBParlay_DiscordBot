@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.integrations import team_aliases
 from bot.parlays import repository
 
 SEASON_TYPE_CHOICES = [
@@ -40,6 +41,50 @@ class AdminCog(commands.GroupCog, name="admin"):
         await interaction.followup.send(
             f"Synced {len(games)} games for {season_type_value} week {week}, {year}.",
             ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="refresh-odds", description="Pull the current week's odds from The Odds API"
+    )
+    async def refresh_odds(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        week = repository.get_latest_week(self.bot.conn)
+        if week is None:
+            await interaction.followup.send(
+                "No week has been synced yet - run /admin sync-week first.", ephemeral=True
+            )
+            return
+
+        events = await self.bot.odds.get_ncaaf_odds()
+        result = repository.sync_odds_for_week(self.bot.conn, week["id"], events)
+
+        message = f"Matched odds for {result.matched} game(s)."
+        if result.unmatched:
+            unmatched_list = "\n".join(
+                f"- {away} @ {home}" for home, away in result.unmatched
+            )
+            message += (
+                f"\n\n{len(result.unmatched)} event(s) couldn't be matched to a synced game "
+                f"(team name mismatch). Use /admin add-alias to map them:\n{unmatched_list}"
+            )
+        await interaction.followup.send(message, ephemeral=True)
+
+    @app_commands.command(
+        name="add-alias",
+        description="Map a team name from The Odds API to its CollegeFootballData name",
+    )
+    @app_commands.describe(
+        source_team="Team name as it appears from The Odds API (e.g. 'Texas Longhorns')",
+        canonical_team="Team name as it appears from CollegeFootballData (e.g. 'Texas')",
+    )
+    async def add_alias(
+        self, interaction: discord.Interaction, source_team: str, canonical_team: str
+    ):
+        team_aliases.add_alias(
+            self.bot.conn, team_aliases.ODDS_API_SOURCE, source_team, canonical_team
+        )
+        await interaction.response.send_message(
+            f"Mapped '{source_team}' -> '{canonical_team}'.", ephemeral=True
         )
 
 

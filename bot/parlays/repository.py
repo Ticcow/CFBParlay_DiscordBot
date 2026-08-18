@@ -1,6 +1,9 @@
 import sqlite3
+from dataclasses import dataclass, field
 
+from bot.integrations import team_aliases
 from bot.integrations.cfbd_client import CfbdGame
+from bot.integrations.odds_client import OddsEvent
 
 
 def upsert_week(
@@ -72,3 +75,99 @@ def log_api_usage(
         (service, endpoint, credits_used),
     )
     conn.commit()
+
+
+def find_game_by_teams(
+    conn: sqlite3.Connection, week_id: int, team_a: str, team_b: str
+) -> tuple[sqlite3.Row | None, bool]:
+    """Match a game by its two teams, regardless of which side is "home" in the
+    caller's data. Returns (game_row, flipped) where flipped=True means team_a is
+    actually our away team (the caller's home/away disagreed with ours)."""
+    row = conn.execute(
+        "SELECT * FROM games WHERE week_id = ? AND home_team = ? AND away_team = ?",
+        (week_id, team_a, team_b),
+    ).fetchone()
+    if row:
+        return row, False
+    row = conn.execute(
+        "SELECT * FROM games WHERE week_id = ? AND home_team = ? AND away_team = ?",
+        (week_id, team_b, team_a),
+    ).fetchone()
+    return (row, True) if row else (None, False)
+
+
+def insert_odds_snapshot(
+    conn: sqlite3.Connection, game_id: int, event: OddsEvent, flipped: bool
+) -> None:
+    if flipped:
+        # event's fields are relative to event.home_team_raw, which is actually our
+        # away team here - swap prices, and negate the spread (points are always
+        # exact negatives between the two sides of a spread market).
+        spread_home = -event.spread_home if event.spread_home is not None else None
+        spread_price_home = event.spread_price_away
+        spread_price_away = event.spread_price_home
+        moneyline_home = event.moneyline_away
+        moneyline_away = event.moneyline_home
+    else:
+        spread_home = event.spread_home
+        spread_price_home = event.spread_price_home
+        spread_price_away = event.spread_price_away
+        moneyline_home = event.moneyline_home
+        moneyline_away = event.moneyline_away
+
+    conn.execute(
+        """
+        INSERT INTO odds_snapshots (
+            game_id, spread_home, spread_price_home, spread_price_away,
+            moneyline_home, moneyline_away, total_points, over_price, under_price, book
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            game_id,
+            spread_home,
+            spread_price_home,
+            spread_price_away,
+            moneyline_home,
+            moneyline_away,
+            event.total_points,
+            event.over_price,
+            event.under_price,
+            event.book,
+        ),
+    )
+    conn.commit()
+
+
+@dataclass
+class OddsSyncResult:
+    matched: int = 0
+    unmatched: list[tuple[str, str]] = field(default_factory=list)
+
+
+def sync_odds_for_week(
+    conn: sqlite3.Connection, week_id: int, events: list[OddsEvent]
+) -> OddsSyncResult:
+    result = OddsSyncResult()
+    for event in events:
+        home = (
+            team_aliases.resolve(conn, team_aliases.ODDS_API_SOURCE, event.home_team_raw)
+            or event.home_team_raw
+        )
+        away = (
+            team_aliases.resolve(conn, team_aliases.ODDS_API_SOURCE, event.away_team_raw)
+            or event.away_team_raw
+        )
+        game, flipped = find_game_by_teams(conn, week_id, home, away)
+        if game is None:
+            result.unmatched.append((event.home_team_raw, event.away_team_raw))
+            continue
+        insert_odds_snapshot(conn, game["id"], event, flipped)
+        result.matched += 1
+    return result
+
+
+def get_latest_odds_snapshot(conn: sqlite3.Connection, game_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM odds_snapshots WHERE game_id = ? ORDER BY fetched_at DESC, id DESC LIMIT 1",
+        (game_id,),
+    ).fetchone()
