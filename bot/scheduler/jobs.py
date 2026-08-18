@@ -31,6 +31,9 @@ async def sync_week_games(bot) -> int | None:
     week_id = repository.upsert_week(bot.conn, target.season, target.week, target.season_type)
     repository.upsert_games(bot.conn, week_id, games)
 
+    ranked_teams = await bot.cfbd.get_ap_top25(target.season, target.week, target.season_type)
+    repository.replace_rankings(bot.conn, week_id, ranked_teams)
+
     if already_synced is None:
         await bot.announce(
             f"📅 Week {target.week} ({target.season_type}) is open - {len(games)} games "

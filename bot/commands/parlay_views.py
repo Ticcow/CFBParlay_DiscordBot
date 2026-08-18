@@ -67,8 +67,7 @@ class ParlayPanelView(discord.ui.View):
         self.add_item(cancel_button)
 
     async def _on_add(self, interaction: discord.Interaction):
-        embed = discord.Embed(title="Add a leg", description="Pick a game from the dropdown below.")
-        view = GamePickerView(self.bot, self.parlay_id, self.week_id, page=0)
+        embed, view = _ranked_screen(self.bot, self.parlay_id, self.week_id)
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _on_remove(self, interaction: discord.Interaction):
@@ -99,6 +98,73 @@ class ParlayPanelView(discord.ui.View):
             title="Parlay cancelled", description="Start a new one anytime with /parlay start."
         )
         await interaction.response.edit_message(embed=embed, view=None)
+
+
+def _format_ranked_list(ranked_games: list[tuple[int, object]]) -> str:
+    if not ranked_games:
+        return "No ranked teams have an available game this week."
+    return "\n".join(
+        f"**#{rank}** {game['away_team']} @ {game['home_team']} — {_kickoff_label(game['start_time_utc'])}"
+        for rank, game in ranked_games
+    )
+
+
+def _ranked_screen(bot, parlay_id: int, week_id: int) -> tuple[discord.Embed, "RankedGamePickerView"]:
+    now = timeutils.utc_now()
+    ranked_games = repository.list_ranked_games_for_leg(bot.conn, week_id, parlay_id, now)
+    embed = discord.Embed(title="🏈 Top 25 Games", description=_format_ranked_list(ranked_games))
+    return embed, RankedGamePickerView(bot, parlay_id, week_id, ranked_games)
+
+
+class RankedGamePickerView(discord.ui.View):
+    def __init__(self, bot, parlay_id: int, week_id: int, ranked_games: list[tuple[int, object]]):
+        super().__init__(timeout=VIEW_TIMEOUT)
+        self.bot = bot
+        self.parlay_id = parlay_id
+        self.week_id = week_id
+        self.ranked_games = ranked_games
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        options = [
+            discord.SelectOption(
+                label=f"#{rank} {game['away_team']} @ {game['home_team']}"[:100],
+                value=str(game["id"]),
+                description=_kickoff_label(game["start_time_utc"]),
+            )
+            for rank, game in self.ranked_games[:PAGE_SIZE]
+        ]
+        select = discord.ui.Select(
+            placeholder="Choose a ranked game..." if options else "No ranked games available",
+            options=options or [discord.SelectOption(label="No ranked games available", value="none")],
+            disabled=not options,
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+
+        show_all_button = discord.ui.Button(label="Show All Games", style=discord.ButtonStyle.secondary)
+        show_all_button.callback = self._on_show_all
+        self.add_item(show_all_button)
+
+        back_button = discord.ui.Button(label="Back", style=discord.ButtonStyle.danger)
+        back_button.callback = self._on_back
+        self.add_item(back_button)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        game_id = int(interaction.data["values"][0])
+        game = repository.get_game(self.bot.conn, game_id)
+        embed, view = _market_screen(self.bot, self.parlay_id, self.week_id, game)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _on_show_all(self, interaction: discord.Interaction):
+        embed = discord.Embed(title="Add a leg", description="Pick a game from the dropdown below.")
+        view = GamePickerView(self.bot, self.parlay_id, self.week_id, page=0)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _on_back(self, interaction: discord.Interaction):
+        embed, view = render_panel(self.bot, self.parlay_id)
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 class GamePickerView(discord.ui.View):
@@ -163,7 +229,7 @@ class GamePickerView(discord.ui.View):
         await interaction.response.edit_message(view=self)
 
     async def _on_back(self, interaction: discord.Interaction):
-        embed, view = render_panel(self.bot, self.parlay_id)
+        embed, view = _ranked_screen(self.bot, self.parlay_id, self.week_id)
         await interaction.response.edit_message(embed=embed, view=view)
 
 
@@ -171,6 +237,9 @@ def _market_screen(bot, parlay_id: int, week_id: int, game) -> tuple[discord.Emb
     embed = discord.Embed(
         title=f"{game['away_team']} @ {game['home_team']}", description="Pick a bet type."
     )
+    logo_url = repository.get_team_logo(bot.conn, game["home_team"])
+    if logo_url:
+        embed.set_thumbnail(url=logo_url)
     snapshot = repository.get_latest_odds_snapshot(bot.conn, game["id"])
     return embed, MarketPickerView(bot, parlay_id, week_id, game, snapshot)
 
@@ -211,8 +280,7 @@ class MarketPickerView(discord.ui.View):
         return callback
 
     async def _on_back(self, interaction: discord.Interaction):
-        embed = discord.Embed(title="Add a leg", description="Pick a game from the dropdown below.")
-        view = GamePickerView(self.bot, self.parlay_id, self.week_id, page=0)
+        embed, view = _ranked_screen(self.bot, self.parlay_id, self.week_id)
         await interaction.response.edit_message(embed=embed, view=view)
 
 
@@ -223,6 +291,9 @@ def _selection_screen(
         title=f"{game['away_team']} @ {game['home_team']}",
         description=f"Pick your {market} selection.",
     )
+    logo_url = repository.get_team_logo(bot.conn, game["home_team"])
+    if logo_url:
+        embed.set_thumbnail(url=logo_url)
     return embed, SelectionPickerView(bot, parlay_id, week_id, game, snapshot, market)
 
 

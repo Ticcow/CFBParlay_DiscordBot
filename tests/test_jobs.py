@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from bot.integrations.cfbd_client import CalendarWeek, CfbdGame
+from bot.integrations.cfbd_client import CalendarWeek, CfbdGame, RankedTeam
 from bot.integrations.odds_client import OddsEvent
 from bot.parlays import repository, timeutils
 from bot.scheduler import jobs
@@ -19,12 +19,16 @@ class FakeCfbdClient:
     def __init__(self):
         self.calendar = []
         self.games = []
+        self.ranked_teams = []
 
     async def get_calendar(self, year):
         return self.calendar
 
     async def get_games(self, year, week, season_type):
         return self.games
+
+    async def get_ap_top25(self, year, week, season_type):
+        return self.ranked_teams
 
 
 class FakeOddsClient:
@@ -70,6 +74,7 @@ async def test_sync_week_games_creates_week_and_announces_once(conn):
     bot = FakeBot(conn)
     bot.cfbd.calendar = [make_calendar_week()]
     bot.cfbd.games = [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "scheduled", None, None)]
+    bot.cfbd.ranked_teams = [RankedTeam(1, "Texas")]
 
     week_id = await jobs.sync_week_games(bot)
 
@@ -77,6 +82,8 @@ async def test_sync_week_games_creates_week_and_announces_once(conn):
     assert len(bot.announcements) == 1
     assert "Week 1" in bot.announcements[0]
     assert repository.get_latest_week(conn)["week_number"] == 1
+    rankings = conn.execute("SELECT school FROM rankings WHERE week_id = ?", (week_id,)).fetchall()
+    assert [r["school"] for r in rankings] == ["Texas"]
 
     week_id_again = await jobs.sync_week_games(bot)  # re-syncing shouldn't re-announce
     assert week_id_again == week_id

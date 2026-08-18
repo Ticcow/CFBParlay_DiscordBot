@@ -2,7 +2,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from bot.integrations import team_aliases
-from bot.integrations.cfbd_client import CfbdGame
+from bot.integrations.cfbd_client import CfbdGame, RankedTeam, TeamInfo
 from bot.integrations.odds_client import OddsEvent
 from bot.parlays import timeutils
 
@@ -207,6 +207,64 @@ def list_available_games_for_leg(
     ]
     start = page * page_size
     return upcoming[start : start + page_size], len(upcoming)
+
+
+def list_ranked_games_for_leg(
+    conn: sqlite3.Connection, week_id: int, parlay_id: int, now
+) -> list[tuple[int, sqlite3.Row]]:
+    """AP Top 25 teams' games this week, ordered by rank, as (rank, game_row)
+    pairs. A team on a bye contributes nothing (no matching game); two ranked
+    teams playing each other appears once, under the higher-ranked (lower
+    number) team's slot. Excludes started games and games already on this
+    parlay, same as list_available_games_for_leg."""
+    used_game_ids = {leg["game_id"] for leg in list_legs(conn, parlay_id)}
+    rankings = conn.execute(
+        "SELECT rank, school FROM rankings WHERE week_id = ? ORDER BY rank", (week_id,)
+    ).fetchall()
+
+    seen_game_ids = set()
+    results = []
+    for row in rankings:
+        game = conn.execute(
+            "SELECT * FROM games WHERE week_id = ? AND (home_team = ? OR away_team = ?)",
+            (week_id, row["school"], row["school"]),
+        ).fetchone()
+        if game is None:
+            continue  # bye week
+        if game["id"] in used_game_ids or game["id"] in seen_game_ids:
+            continue
+        if timeutils.parse_utc(game["start_time_utc"]) <= now:
+            continue
+        seen_game_ids.add(game["id"])
+        results.append((row["rank"], game))
+    return results
+
+
+def replace_rankings(conn: sqlite3.Connection, week_id: int, ranked_teams: list[RankedTeam]) -> None:
+    conn.execute("DELETE FROM rankings WHERE week_id = ?", (week_id,))
+    for team in ranked_teams:
+        conn.execute(
+            "INSERT INTO rankings (week_id, rank, school) VALUES (?, ?, ?)",
+            (week_id, team.rank, team.school),
+        )
+    conn.commit()
+
+
+def get_team_logo(conn: sqlite3.Connection, school: str) -> str | None:
+    row = conn.execute("SELECT logo_url FROM team_logos WHERE school = ?", (school,)).fetchone()
+    return row["logo_url"] if row and row["logo_url"] else None
+
+
+def upsert_team_logos(conn: sqlite3.Connection, teams: list[TeamInfo]) -> None:
+    for team in teams:
+        conn.execute(
+            """
+            INSERT INTO team_logos (school, logo_url) VALUES (?, ?)
+            ON CONFLICT (school) DO UPDATE SET logo_url = excluded.logo_url
+            """,
+            (team.school, team.logo_url),
+        )
+    conn.commit()
 
 
 # --- weekly bankroll ---

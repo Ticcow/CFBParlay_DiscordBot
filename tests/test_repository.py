@@ -1,7 +1,7 @@
 import pytest
 
 from bot.integrations import team_aliases
-from bot.integrations.cfbd_client import CfbdGame
+from bot.integrations.cfbd_client import CfbdGame, RankedTeam, TeamInfo
 from bot.integrations.odds_client import OddsEvent
 from bot.parlays import repository
 
@@ -417,3 +417,106 @@ def test_list_available_games_for_leg_paginates(conn):
     assert total_again == 30
     assert len(page0) == 25
     assert len(page1) == 5
+
+
+# --- rankings / team logos ---
+
+
+def test_list_ranked_games_for_leg_orders_by_rank_and_skips_byes(conn):
+    import datetime
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    now = datetime.datetime(2026, 8, 28, tzinfo=datetime.timezone.utc)
+    future = (now + datetime.timedelta(hours=1)).isoformat()
+    repository.upsert_games(
+        conn,
+        week_id,
+        [
+            CfbdGame(1, "Georgia", "Marshall", future, "scheduled", None, None),
+            CfbdGame(2, "Michigan", "Duke", future, "scheduled", None, None),
+            # Ohio State (rank 2) has no game this week - a bye
+        ],
+    )
+    repository.replace_rankings(
+        conn,
+        week_id,
+        [
+            RankedTeam(1, "Georgia"),
+            RankedTeam(2, "Ohio State"),
+            RankedTeam(3, "Michigan"),
+        ],
+    )
+    parlay_id = repository.start_parlay(conn, user_id=1, week_id=week_id)
+
+    ranked = repository.list_ranked_games_for_leg(conn, week_id, parlay_id, now)
+
+    assert [rank for rank, _ in ranked] == [1, 3]
+    assert [game["home_team"] for _, game in ranked] == ["Georgia", "Michigan"]
+
+
+def test_list_ranked_games_for_leg_dedupes_ranked_vs_ranked_matchup(conn):
+    import datetime
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    now = datetime.datetime(2026, 8, 28, tzinfo=datetime.timezone.utc)
+    future = (now + datetime.timedelta(hours=1)).isoformat()
+    repository.upsert_games(conn, week_id, [CfbdGame(1, "Georgia", "Alabama", future, "scheduled", None, None)])
+    repository.replace_rankings(conn, week_id, [RankedTeam(1, "Georgia"), RankedTeam(2, "Alabama")])
+    parlay_id = repository.start_parlay(conn, user_id=1, week_id=week_id)
+
+    ranked = repository.list_ranked_games_for_leg(conn, week_id, parlay_id, now)
+
+    assert len(ranked) == 1
+    assert ranked[0][0] == 1  # appears once, under the higher (lower-number) rank
+
+
+def test_list_ranked_games_for_leg_excludes_started_and_already_used(conn):
+    import datetime
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    now = datetime.datetime(2026, 8, 28, tzinfo=datetime.timezone.utc)
+    past = (now - datetime.timedelta(hours=1)).isoformat()
+    future = (now + datetime.timedelta(hours=1)).isoformat()
+    repository.upsert_games(
+        conn,
+        week_id,
+        [
+            CfbdGame(1, "Georgia", "Marshall", past, "scheduled", None, None),
+            CfbdGame(2, "Michigan", "Duke", future, "scheduled", None, None),
+        ],
+    )
+    repository.replace_rankings(conn, week_id, [RankedTeam(1, "Georgia"), RankedTeam(2, "Michigan")])
+    parlay_id = repository.start_parlay(conn, user_id=1, week_id=week_id)
+    michigan_game, _ = repository.find_game_by_teams(conn, week_id, "Michigan", "Duke")
+    event = OddsEvent("Michigan", "Duke", future, "draftkings", moneyline_home=-150, moneyline_away=130)
+    repository.insert_odds_snapshot(conn, michigan_game["id"], event, flipped=False)
+    snapshot = repository.get_latest_odds_snapshot(conn, michigan_game["id"])
+    repository.add_leg(conn, parlay_id, michigan_game["id"], snapshot["id"], "moneyline", "home", None, -150)
+
+    ranked = repository.list_ranked_games_for_leg(conn, week_id, parlay_id, now)
+
+    assert ranked == []  # Georgia's game started, Michigan's is already a leg
+
+
+def test_replace_rankings_overwrites_previous_week_rankings(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.replace_rankings(conn, week_id, [RankedTeam(1, "Georgia")])
+    repository.replace_rankings(conn, week_id, [RankedTeam(1, "Ohio State")])
+
+    rows = conn.execute("SELECT school FROM rankings WHERE week_id = ?", (week_id,)).fetchall()
+    assert [r["school"] for r in rows] == ["Ohio State"]
+
+
+def test_team_logo_round_trip(conn):
+    assert repository.get_team_logo(conn, "Notre Dame") is None
+
+    repository.upsert_team_logos(conn, [TeamInfo("Notre Dame", "https://example.com/nd.png")])
+
+    assert repository.get_team_logo(conn, "Notre Dame") == "https://example.com/nd.png"
+
+
+def test_upsert_team_logos_updates_existing_url(conn):
+    repository.upsert_team_logos(conn, [TeamInfo("Notre Dame", "https://example.com/old.png")])
+    repository.upsert_team_logos(conn, [TeamInfo("Notre Dame", "https://example.com/new.png")])
+
+    assert repository.get_team_logo(conn, "Notre Dame") == "https://example.com/new.png"

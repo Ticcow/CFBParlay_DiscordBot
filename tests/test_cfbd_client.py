@@ -58,3 +58,65 @@ async def test_get_games_invokes_usage_logger():
     await client.get_games(2026, 1)
 
     assert calls == [("cfbd", "/games")]
+
+
+RAW_RANKINGS_WEEK = {
+    "season": 2026,
+    "week": 1,
+    "seasonType": "regular",
+    "polls": [
+        {
+            "poll": "Coaches Poll",
+            "ranks": [{"rank": 1, "school": "Wrong Poll Team"}],
+        },
+        {
+            "poll": "AP Top 25",
+            "ranks": [
+                {"rank": 1, "school": "Georgia"},
+                {"rank": 2, "school": "Ohio State"},
+            ],
+        },
+    ],
+}
+
+
+@respx.mock
+async def test_get_ap_top25_finds_the_ap_poll_specifically():
+    respx.get("https://api.collegefootballdata.com/rankings").mock(
+        return_value=Response(200, json=[RAW_RANKINGS_WEEK])
+    )
+
+    client = CfbdClient(api_key="test-key")
+    ranked = await client.get_ap_top25(2026, 1)
+
+    assert [(r.rank, r.school) for r in ranked] == [(1, "Georgia"), (2, "Ohio State")]
+
+
+@respx.mock
+async def test_get_ap_top25_returns_empty_when_no_ap_poll_present():
+    week_with_no_ap_poll = {**RAW_RANKINGS_WEEK, "polls": [RAW_RANKINGS_WEEK["polls"][0]]}
+    respx.get("https://api.collegefootballdata.com/rankings").mock(
+        return_value=Response(200, json=[week_with_no_ap_poll])
+    )
+
+    client = CfbdClient(api_key="test-key")
+    ranked = await client.get_ap_top25(2026, 1)
+
+    assert ranked == []
+
+
+@respx.mock
+async def test_get_teams_parses_logo_from_first_url():
+    respx.get("https://api.collegefootballdata.com/teams/fbs").mock(
+        return_value=Response(200, json=[
+            {"school": "Notre Dame", "logos": ["https://example.com/nd1.png", "https://example.com/nd2.png"]},
+            {"school": "Army", "logos": []},
+        ])
+    )
+
+    client = CfbdClient(api_key="test-key")
+    teams = await client.get_teams(2026)
+
+    assert teams[0].school == "Notre Dame"
+    assert teams[0].logo_url == "https://example.com/nd1.png"
+    assert teams[1].logo_url is None

@@ -48,6 +48,33 @@ def _parse_calendar_week(raw: dict) -> CalendarWeek:
     )
 
 
+@dataclass
+class RankedTeam:
+    rank: int
+    school: str
+
+
+@dataclass
+class TeamInfo:
+    school: str
+    logo_url: str | None
+
+
+def _parse_teams_top25(raw_weeks: list[dict]) -> list[RankedTeam]:
+    for week_entry in raw_weeks:
+        for poll in week_entry.get("polls", []):
+            if poll.get("poll") == "AP Top 25":
+                return [
+                    RankedTeam(rank=r["rank"], school=r["school"]) for r in poll["ranks"]
+                ]
+    return []
+
+
+def _parse_team(raw: dict) -> TeamInfo:
+    logos = raw.get("logos") or []
+    return TeamInfo(school=raw["school"], logo_url=logos[0] if logos else None)
+
+
 class CfbdClient:
     def __init__(self, api_key: str, log_usage=None):
         self._headers = {"Authorization": f"Bearer {api_key}"}
@@ -78,3 +105,23 @@ class CfbdClient:
             if self._log_usage:
                 self._log_usage("cfbd", "/calendar")
             return [_parse_calendar_week(raw) for raw in response.json()]
+
+    async def get_ap_top25(
+        self, year: int, week: int, season_type: str = "regular"
+    ) -> list[RankedTeam]:
+        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers) as client:
+            response = await client.get(
+                "/rankings", params={"year": year, "week": week, "seasonType": season_type}
+            )
+            response.raise_for_status()
+            if self._log_usage:
+                self._log_usage("cfbd", "/rankings")
+            return _parse_teams_top25(response.json())
+
+    async def get_teams(self, year: int) -> list[TeamInfo]:
+        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers) as client:
+            response = await client.get("/teams/fbs", params={"year": year})
+            response.raise_for_status()
+            if self._log_usage:
+                self._log_usage("cfbd", "/teams/fbs")
+            return [_parse_team(raw) for raw in response.json()]

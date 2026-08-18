@@ -3,8 +3,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.integrations import team_aliases
-from bot.parlays import repository
+from bot.parlays import repository, timeutils
 from bot.scheduler import jobs as scheduler_jobs
+from bot.scheduler import season
 
 SEASON_TYPE_CHOICES = [
     app_commands.Choice(name="regular", value="regular"),
@@ -67,6 +68,8 @@ class AdminCog(commands.GroupCog, name="admin"):
         games = await self.bot.cfbd.get_games(year, week, season_type_value)
         week_id = repository.upsert_week(self.bot.conn, year, week, season_type_value)
         repository.upsert_games(self.bot.conn, week_id, games)
+        ranked_teams = await self.bot.cfbd.get_ap_top25(year, week, season_type_value)
+        repository.replace_rankings(self.bot.conn, week_id, ranked_teams)
         await interaction.followup.send(
             f"Synced {len(games)} games for {season_type_value} week {week}, {year}.",
             ephemeral=True,
@@ -166,6 +169,17 @@ class AdminCog(commands.GroupCog, name="admin"):
         for row in rows:
             lines.append(f"- {row['service']}: {row['total_credits']} credits ({row['calls']} calls)")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @app_commands.command(
+        name="sync-teams",
+        description="Cache team logos from CollegeFootballData (run once per season, not weekly)",
+    )
+    async def sync_teams(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        year = season.season_year_for(timeutils.utc_now())
+        teams = await self.bot.cfbd.get_teams(year)
+        repository.upsert_team_logos(self.bot.conn, teams)
+        await interaction.followup.send(f"Cached logos for {len(teams)} teams.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
