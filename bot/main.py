@@ -49,7 +49,15 @@ class DegenBot(commands.Bot):
             guild = discord.Object(id=settings.dev_guild_id)
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
-            logger.info("Synced commands to dev guild %s", settings.dev_guild_id)
+            # Clear any commands registered globally in a past run (e.g. before
+            # DEV_GUILD_ID was set) - Discord doesn't drop old global registrations
+            # on its own, and leaving them creates duplicate-looking commands
+            # alongside the guild-scoped copies above.
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
+            logger.info(
+                "Synced commands to dev guild %s (cleared stale globals)", settings.dev_guild_id
+            )
         else:
             await self.tree.sync()
             logger.info("Synced commands globally")

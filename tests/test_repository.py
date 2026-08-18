@@ -520,3 +520,43 @@ def test_upsert_team_logos_updates_existing_url(conn):
     repository.upsert_team_logos(conn, [TeamInfo("Notre Dame", "https://example.com/new.png")])
 
     assert repository.get_team_logo(conn, "Notre Dame") == "https://example.com/new.png"
+
+
+# --- admin test-fixture helpers ---
+
+
+def test_set_game_final_score(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(conn, week_id, [make_game()])
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+
+    repository.set_game_final_score(conn, game["id"], home_score=24, away_score=17)
+
+    updated = repository.get_game(conn, game["id"])
+    assert updated["status"] == "final"
+    assert updated["home_score"] == 24
+    assert updated["away_score"] == 17
+
+
+def test_delete_week_cascade_removes_everything_under_the_week(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(conn, week_id, [make_game()])
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    repository.insert_odds_snapshot(conn, game["id"], make_odds_event(), flipped=False)
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
+    repository.replace_rankings(conn, week_id, [RankedTeam(1, "Texas")])
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 7, week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "spread", "home", -6.5, -110)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 190.91)
+
+    removed = repository.delete_week_cascade(conn, week_id)
+
+    assert removed == 1
+    assert repository.get_week(conn, week_id) is None
+    assert repository.get_game(conn, game["id"]) is None
+    assert repository.get_latest_odds_snapshot(conn, game["id"]) is None
+    assert repository.get_parlay(conn, parlay_id) is None
+    assert repository.get_participant(conn, 7, week_id) is None
+    rankings = conn.execute("SELECT * FROM rankings WHERE week_id = ?", (week_id,)).fetchall()
+    assert rankings == []

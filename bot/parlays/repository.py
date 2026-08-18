@@ -593,3 +593,42 @@ def get_monthly_api_usage(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         "FROM api_usage_log WHERE called_at >= datetime('now', 'start of month') "
         "GROUP BY service ORDER BY service"
     ).fetchall()
+
+
+def set_game_final_score(
+    conn: sqlite3.Connection, game_id: int, home_score: int, away_score: int
+) -> None:
+    """Manually forces a game to 'final' with a specific score - lets an admin
+    grade a week without waiting on CFBD, and is also a plain correction tool if
+    CFBD's own data is ever wrong or late."""
+    conn.execute(
+        "UPDATE games SET status = 'final', home_score = ?, away_score = ?, "
+        "updated_at = datetime('now') WHERE id = ?",
+        (home_score, away_score, game_id),
+    )
+    conn.commit()
+
+
+def delete_week_cascade(conn: sqlite3.Connection, week_id: int) -> int:
+    """Deletes a week and everything under it (parlays, legs, bankrolls, odds,
+    games, rankings). No ON DELETE CASCADE is declared on these tables, so the
+    deletes are ordered manually, deepest-dependent first. Returns how many
+    games were removed."""
+    conn.execute(
+        "DELETE FROM parlay_legs WHERE parlay_id IN (SELECT id FROM parlays WHERE week_id = ?)",
+        (week_id,),
+    )
+    conn.execute("DELETE FROM parlays WHERE week_id = ?", (week_id,))
+    conn.execute("DELETE FROM week_participants WHERE week_id = ?", (week_id,))
+    conn.execute(
+        "DELETE FROM odds_snapshots WHERE game_id IN (SELECT id FROM games WHERE week_id = ?)",
+        (week_id,),
+    )
+    game_count = conn.execute(
+        "SELECT COUNT(*) FROM games WHERE week_id = ?", (week_id,)
+    ).fetchone()[0]
+    conn.execute("DELETE FROM games WHERE week_id = ?", (week_id,))
+    conn.execute("DELETE FROM rankings WHERE week_id = ?", (week_id,))
+    conn.execute("DELETE FROM weeks WHERE id = ?", (week_id,))
+    conn.commit()
+    return game_count

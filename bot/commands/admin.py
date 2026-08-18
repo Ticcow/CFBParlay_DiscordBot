@@ -1,8 +1,12 @@
+from datetime import timedelta
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from bot.integrations import team_aliases
+from bot.integrations.cfbd_client import CfbdGame, RankedTeam
+from bot.integrations.odds_client import OddsEvent
 from bot.parlays import repository, timeutils
 from bot.scheduler import jobs as scheduler_jobs
 from bot.scheduler import season
@@ -11,6 +15,24 @@ SEASON_TYPE_CHOICES = [
     app_commands.Choice(name="regular", value="regular"),
     app_commands.Choice(name="postseason", value="postseason"),
 ]
+
+# A synthetic week for testing without waiting on real games/odds - season_year
+# 9999 can never collide with a real CFBD week, and the sentinel cfbd_game_ids
+# below can never collide with real (always-positive, much smaller) CFBD ids.
+TEST_SEASON_YEAR = 9999
+TEST_WEEK_NUMBER = 1
+TEST_SEASON_TYPE = "regular"
+TEST_GAMES = [
+    # (cfbd_game_id, home, away, minutes_from_now) - real team names so cached
+    # logos (via /admin sync-teams) and the Top 25 view both have something to show
+    (900000001, "Georgia", "Marshall", 5),
+    (900000002, "Ohio State", "Youngstown State", 10),
+    (900000003, "Alabama", "Western Kentucky", 120),
+    (900000004, "Michigan", "Fresno State", 180),
+    (900000005, "Notre Dame", "Navy", 1440),
+    (900000006, "Texas", "Rice", 2880),
+]
+TEST_RANKINGS = [(1, "Georgia"), (2, "Ohio State"), (3, "Alabama"), (4, "Michigan"), (5, "Notre Dame")]
 
 
 @app_commands.default_permissions(manage_guild=True)
@@ -180,6 +202,112 @@ class AdminCog(commands.GroupCog, name="admin"):
         teams = await self.bot.cfbd.get_teams(year)
         repository.upsert_team_logos(self.bot.conn, teams)
         await interaction.followup.send(f"Cached logos for {len(teams)} teams.", ephemeral=True)
+
+    @app_commands.command(
+        name="test-seed",
+        description="[TEST] Create a synthetic test week - no waiting on real games/odds",
+    )
+    async def test_seed(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        existing = repository.get_week_by_number(
+            self.bot.conn, TEST_SEASON_YEAR, TEST_WEEK_NUMBER, TEST_SEASON_TYPE
+        )
+        if existing:
+            repository.delete_week_cascade(self.bot.conn, existing["id"])
+
+        week_id = repository.upsert_week(
+            self.bot.conn, TEST_SEASON_YEAR, TEST_WEEK_NUMBER, TEST_SEASON_TYPE
+        )
+        now = timeutils.utc_now()
+        games = [
+            CfbdGame(
+                cfbd_game_id=cfbd_id,
+                home_team=home,
+                away_team=away,
+                start_time_utc=(now + timedelta(minutes=offset)).isoformat(),
+                status="scheduled",
+                home_score=None,
+                away_score=None,
+            )
+            for cfbd_id, home, away, offset in TEST_GAMES
+        ]
+        repository.upsert_games(self.bot.conn, week_id, games)
+
+        for _, home, away, _ in TEST_GAMES:
+            game, _ = repository.find_game_by_teams(self.bot.conn, week_id, home, away)
+            event = OddsEvent(
+                home_team_raw=home, away_team_raw=away, commence_time=game["start_time_utc"], book="test",
+                spread_home=-6.5, spread_price_home=-110, spread_price_away=-110,
+                moneyline_home=-250, moneyline_away=200,
+                total_points=52.5, over_price=-110, under_price=-110,
+            )
+            repository.insert_odds_snapshot(self.bot.conn, game["id"], event, flipped=False)
+
+        repository.replace_rankings(
+            self.bot.conn, week_id, [RankedTeam(rank=r, school=s) for r, s in TEST_RANKINGS]
+        )
+
+        await interaction.followup.send(
+            f"Seeded a test week with {len(TEST_GAMES)} games (some kick off in minutes, "
+            "some in hours/a day) and Top 25 rankings - it's now the latest week, so /board, "
+            "/optin, /parlay start, etc. all use it. Use /admin test-finish-game to force any "
+            "game final with a score of your choosing, then /admin grade-week. Run "
+            "/admin test-teardown when you're done.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="test-finish-game",
+        description="[TEST] Force a game to final with a specific score, to test grading on demand",
+    )
+    @app_commands.describe(
+        game="Which game", home_score="Home team's final score", away_score="Away team's final score"
+    )
+    async def test_finish_game(
+        self, interaction: discord.Interaction, game: str, home_score: int, away_score: int
+    ):
+        try:
+            game_id = int(game)
+        except ValueError:
+            await interaction.response.send_message(
+                "Pick a game from the autocomplete list.", ephemeral=True
+            )
+            return
+        repository.set_game_final_score(self.bot.conn, game_id, home_score, away_score)
+        await interaction.response.send_message(
+            f"Marked game final: {away_score}-{home_score}. Run /admin grade-week to grade it.",
+            ephemeral=True,
+        )
+
+    @test_finish_game.autocomplete("game")
+    async def test_finish_game_autocomplete(self, interaction: discord.Interaction, current: str):
+        week = repository.get_latest_week(self.bot.conn)
+        if week is None:
+            return []
+        games = repository.search_games(self.bot.conn, week["id"], current, limit=25)
+        return [
+            app_commands.Choice(
+                name=f"{g['away_team']} @ {g['home_team']} [{g['status']}]"[:100], value=str(g["id"])
+            )
+            for g in games
+        ]
+
+    @app_commands.command(
+        name="test-teardown", description="[TEST] Delete the synthetic test week and everything under it"
+    )
+    async def test_teardown(self, interaction: discord.Interaction):
+        week = repository.get_week_by_number(
+            self.bot.conn, TEST_SEASON_YEAR, TEST_WEEK_NUMBER, TEST_SEASON_TYPE
+        )
+        if week is None:
+            await interaction.response.send_message(
+                "No test week found - nothing to tear down.", ephemeral=True
+            )
+            return
+        removed = repository.delete_week_cascade(self.bot.conn, week["id"])
+        await interaction.response.send_message(
+            f"Test week removed ({removed} games deleted along with it).", ephemeral=True
+        )
 
 
 async def setup(bot: commands.Bot):
