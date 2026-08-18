@@ -28,6 +28,34 @@ def _lock_for(channel_id: int) -> asyncio.Lock:
     return _locks.setdefault(channel_id, asyncio.Lock())
 
 
+class PanelActionsView(discord.ui.View):
+    """Stateless and registered as a persistent view (see main.py's setup_hook)
+    so these buttons keep working on old panel messages even across a bot
+    restart, not just until the next refresh happens to repost a fresh one.
+    Each button's own logic lives in bankroll.py/parlay.py, shared verbatim
+    with the equivalent slash command - imported lazily here to avoid a
+    circular import, since those modules import this one for status_panel.refresh()."""
+
+    def __init__(self, *, week_is_open: bool = True):
+        super().__init__(timeout=None)
+        self.optin_button.disabled = not week_is_open
+        self.start_parlay_button.disabled = not week_is_open
+
+    @discord.ui.button(label="🎲 Opt In", style=discord.ButtonStyle.success, custom_id="degen_bot:panel:optin")
+    async def optin_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        from bot.commands import bankroll
+
+        await bankroll.handle_optin(interaction)
+
+    @discord.ui.button(
+        label="🏈 Start Parlay", style=discord.ButtonStyle.primary, custom_id="degen_bot:panel:start_parlay"
+    )
+    async def start_parlay_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        from bot.commands import parlay
+
+        await parlay.handle_start_parlay(interaction)
+
+
 def _build_embed(bot, week) -> discord.Embed:
     embed = discord.Embed(title=PANEL_EMBED_TITLE, color=discord.Color.gold())
     if week is None:
@@ -76,7 +104,7 @@ def _build_embed(bot, week) -> discord.Embed:
                 name="...", value=f"+{len(submitted) - MAX_BET_FIELDS} more parlay(s) not shown", inline=False
             )
 
-    embed.set_footer(text="Updates automatically - /optin, /parlay start, /leaderboard for season stats")
+    embed.set_footer(text="Buttons below to join in, or /optin, /parlay start, /leaderboard for season stats")
     return embed
 
 
@@ -115,13 +143,14 @@ async def refresh(bot) -> None:
 
         week = repository.get_latest_week(bot.conn)
         embed = _build_embed(bot, week)
+        view = PanelActionsView(week_is_open=week is not None)
 
         old_message = _panels.get(channel_id)
         if old_message is None:
             await _delete_stale_panels(channel)
 
         try:
-            new_message = await channel.send(embed=embed)
+            new_message = await channel.send(embed=embed, view=view)
         except discord.HTTPException:
             logger.warning("Failed to post week panel to channel %s", channel_id)
             return

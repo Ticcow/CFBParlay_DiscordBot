@@ -6,6 +6,28 @@ from bot.commands import parlay_views
 from bot.parlays import repository
 
 
+async def handle_start_parlay(interaction: discord.Interaction) -> None:
+    """Shared by /parlay start and the status panel's Start Parlay button."""
+    bot = interaction.client
+    week = repository.get_latest_week(bot.conn)
+    if week is None:
+        await interaction.response.send_message("No week is open yet.", ephemeral=True)
+        return
+    if repository.get_participant(bot.conn, interaction.user.id, week["id"]) is None:
+        await interaction.response.send_message(
+            "Opt in first with /optin (or the panel's Opt In button).", ephemeral=True
+        )
+        return
+
+    parlay = repository.get_draft_parlay(bot.conn, interaction.user.id, week["id"])
+    parlay_id = (
+        parlay["id"] if parlay else repository.start_parlay(bot.conn, interaction.user.id, week["id"])
+    )
+
+    embed, view = parlay_views.render_panel(bot, parlay_id)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
 class ParlayCog(commands.GroupCog, name="parlay"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -15,23 +37,7 @@ class ParlayCog(commands.GroupCog, name="parlay"):
         name="start", description="Start (or resume) building this week's parlay - fully click-through"
     )
     async def start(self, interaction: discord.Interaction):
-        week = repository.get_latest_week(self.bot.conn)
-        if week is None:
-            await interaction.response.send_message("No week is open yet.", ephemeral=True)
-            return
-        if repository.get_participant(self.bot.conn, interaction.user.id, week["id"]) is None:
-            await interaction.response.send_message("Opt in first with /optin.", ephemeral=True)
-            return
-
-        parlay = repository.get_draft_parlay(self.bot.conn, interaction.user.id, week["id"])
-        parlay_id = (
-            parlay["id"]
-            if parlay
-            else repository.start_parlay(self.bot.conn, interaction.user.id, week["id"])
-        )
-
-        embed, view = parlay_views.render_panel(self.bot, parlay_id)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await handle_start_parlay(interaction)
 
     @app_commands.command(name="view", description="View (and resume building) your current draft parlay")
     async def view(self, interaction: discord.Interaction):

@@ -6,6 +6,29 @@ from bot.commands import status_panel
 from bot.parlays import repository
 
 
+async def handle_optin(interaction: discord.Interaction) -> None:
+    """Shared by the /optin command and the status panel's Opt In button - both
+    just need to respond to whatever interaction triggered them the same way."""
+    bot = interaction.client
+    week = repository.get_latest_week(bot.conn)
+    if week is None:
+        await interaction.response.send_message("No week is open yet.", ephemeral=True)
+        return
+
+    if repository.get_participant(bot.conn, interaction.user.id, week["id"]):
+        await interaction.response.send_message(
+            "You're already opted in for this week.", ephemeral=True
+        )
+        return
+
+    repository.opt_in(bot.conn, interaction.user.id, week["id"])
+    await interaction.response.send_message(
+        f"You're in for Week {week['week_number']}! Starting bankroll: $1,000.00",
+        ephemeral=True,
+    )
+    await status_panel.refresh(bot)
+
+
 class BankrollCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -14,23 +37,7 @@ class BankrollCog(commands.Cog):
         name="optin", description="Join this week's competition with a $1,000 bankroll"
     )
     async def optin(self, interaction: discord.Interaction):
-        week = repository.get_latest_week(self.bot.conn)
-        if week is None:
-            await interaction.response.send_message("No week is open yet.", ephemeral=True)
-            return
-
-        if repository.get_participant(self.bot.conn, interaction.user.id, week["id"]):
-            await interaction.response.send_message(
-                "You're already opted in for this week.", ephemeral=True
-            )
-            return
-
-        repository.opt_in(self.bot.conn, interaction.user.id, week["id"])
-        await interaction.response.send_message(
-            f"You're in for Week {week['week_number']}! Starting bankroll: $1,000.00",
-            ephemeral=True,
-        )
-        await status_panel.refresh(self.bot)
+        await handle_optin(interaction)
 
     @app_commands.command(
         name="balance", description="Show your current-week bankroll and parlays"

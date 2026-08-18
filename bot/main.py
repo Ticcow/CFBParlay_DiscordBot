@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from bot import db as db_module
+from bot.commands import status_panel
 from bot.config import settings
 from bot.integrations.cfbd_client import CfbdClient
 from bot.integrations.odds_client import OddsClient
@@ -42,6 +43,12 @@ class DegenBot(commands.Bot):
         self._scheduler_started = False
 
     async def setup_hook(self):
+        # setup_hook runs exactly once per process (unlike on_ready, which can
+        # re-fire on reconnect), so this is the right one-time place to register
+        # a persistent view - it lets old panel messages' buttons keep working
+        # across a restart instead of only until the next refresh reposts one.
+        self.add_view(status_panel.PanelActionsView())
+
         for extension in EXTENSIONS:
             await self.load_extension(extension)
 
