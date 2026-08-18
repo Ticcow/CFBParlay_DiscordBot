@@ -77,3 +77,37 @@ def test_format_selection_button_label_moneyline():
 def test_format_selection_button_label_total():
     label = formatting.format_selection_button_label(make_game(), "total", "under", 54.5, -105)
     assert label == "Under 54.5 (-105)"
+
+
+def make_snapshot(**overrides):
+    snapshot = {
+        "spread_home": -6.5, "spread_price_home": -110, "spread_price_away": -105,
+        "moneyline_home": -250, "moneyline_away": 200,
+        "total_points": 54.5, "over_price": -110, "under_price": -105,
+    }
+    snapshot.update(overrides)
+    return snapshot
+
+
+def test_format_market_lines_spread_shows_both_sides():
+    text = formatting.format_market_lines(make_game(), make_snapshot(), "spread")
+    assert text == "Texas -6.5 (-110)\nOhio State +6.5 (-105)"
+
+
+def test_format_market_lines_moneyline_shows_both_sides():
+    text = formatting.format_market_lines(make_game(), make_snapshot(), "moneyline")
+    assert text == "Texas (-250)\nOhio State (+200)"
+
+
+def test_format_market_lines_total_shows_both_sides():
+    text = formatting.format_market_lines(make_game(), make_snapshot(), "total")
+    assert text == "Over 54.5 (-110)\nUnder 54.5 (-105)"
+
+
+def test_format_market_lines_none_when_no_snapshot():
+    assert formatting.format_market_lines(make_game(), None, "spread") is None
+
+
+def test_format_market_lines_none_when_market_not_cached():
+    snapshot = make_snapshot(spread_home=None, spread_price_home=None, spread_price_away=None)
+    assert formatting.format_market_lines(make_game(), snapshot, "spread") is None

@@ -1,3 +1,6 @@
+from bot.parlays import selections
+
+
 def format_price(price: int | None) -> str:
     if price is None:
         return "?"
@@ -34,3 +37,18 @@ def format_selection_button_label(
         return f"{side} {line_value:g} ({price_str})"
     team = game["home_team"] if selection == "home" else game["away_team"]
     return f"{team} {line_value:+g} ({price_str})"
+
+
+def format_market_lines(game, snapshot, market: str) -> str | None:
+    """Both sides of a cached market, one per line - e.g. for 'spread':
+    'Texas -6.5 (-110)\\nOhio State +6.5 (-105)'. None if that market isn't
+    cached for this game, so a caller can skip showing it entirely."""
+    if snapshot is None:
+        return None
+    lines = []
+    for selection in selections.selection_options(market):
+        line_value, price = selections.resolve_selection(snapshot, market, selection)
+        if price is None:
+            return None
+        lines.append(format_selection_button_label(game, market, selection, line_value, price))
+    return "\n".join(lines)

@@ -242,6 +242,14 @@ def _market_screen(bot, parlay_id: int, week_id: int, game) -> tuple[discord.Emb
     if logo_url:
         embed.set_thumbnail(url=logo_url)
     snapshot = repository.get_latest_odds_snapshot(bot.conn, game["id"])
+
+    for market, label in (("spread", "Spread"), ("moneyline", "Moneyline"), ("total", "Total")):
+        lines = formatting.format_market_lines(game, snapshot, market)
+        if lines:
+            embed.add_field(name=label, value=lines, inline=True)
+    if not embed.fields:
+        embed.add_field(name="Lines", value="No odds cached for this game yet.", inline=False)
+
     return embed, MarketPickerView(bot, parlay_id, week_id, game, snapshot)
 
 
