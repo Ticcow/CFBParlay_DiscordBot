@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.integrations import team_aliases
-from bot.parlays import locking, repository
+from bot.parlays import grading, locking, repository, standings
 
 SEASON_TYPE_CHOICES = [
     app_commands.Choice(name="regular", value="regular"),
@@ -110,6 +110,35 @@ class AdminCog(commands.GroupCog, name="admin"):
             f"expired {len(result['expired_drafts'])} stale draft(s).",
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="grade-week",
+        description="Grade completed games, credit balances, and settle the weekly winner",
+    )
+    async def grade_week_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        week = repository.get_latest_week(self.bot.conn)
+        if week is None:
+            await interaction.followup.send("No week is open yet.", ephemeral=True)
+            return
+
+        result = grading.grade_week(self.bot.conn, week["id"])
+        winners = standings.finalize_week(self.bot.conn, week["id"])
+
+        summary = f"Graded {len(result['graded'])} parlay(s)."
+        if result["skipped_incomplete"]:
+            summary += (
+                f" {len(result['skipped_incomplete'])} parlay(s) still waiting on final scores."
+            )
+        await interaction.followup.send(summary, ephemeral=True)
+
+        if winners:
+            standings_rows = repository.list_week_standings(self.bot.conn, week["id"])
+            lines = [f"🏆 Week {week['week_number']} is final!"]
+            for i, row in enumerate(standings_rows, start=1):
+                crown = " 🏆" if row["is_weekly_winner"] else ""
+                lines.append(f"{i}. <@{row['user_id']}> — ${row['current_balance']:.2f}{crown}")
+            await interaction.channel.send("\n".join(lines))
 
 
 async def setup(bot: commands.Bot):

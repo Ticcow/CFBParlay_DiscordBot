@@ -297,3 +297,67 @@ def test_week_is_visible_false_before_any_leg_has_started(conn):
 def test_week_is_visible_false_with_no_submitted_parlays(conn):
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     assert repository.week_is_visible(conn, week_id) is False
+
+
+# --- leaderboards / history ---
+
+
+def test_season_wins_leaderboard_ranks_by_win_count(conn):
+    week1 = repository.upsert_week(conn, 2026, 1, "regular")
+    week2 = repository.upsert_week(conn, 2026, 2, "regular")
+    repository.opt_in(conn, user_id=1, week_id=week1)
+    repository.opt_in(conn, user_id=1, week_id=week2)
+    repository.opt_in(conn, user_id=2, week_id=week1)
+    conn.execute("UPDATE week_participants SET is_weekly_winner = 1 WHERE user_id = 1")
+    conn.commit()
+
+    rows = repository.season_wins_leaderboard(conn)
+    assert rows[0]["user_id"] == 1
+    assert rows[0]["wins"] == 2
+
+
+def test_season_money_leaderboard_sums_net_across_weeks(conn):
+    week1 = repository.upsert_week(conn, 2026, 1, "regular")
+    week2 = repository.upsert_week(conn, 2026, 2, "regular")
+    repository.opt_in(conn, user_id=1, week_id=week1)
+    repository.opt_in(conn, user_id=1, week_id=week2)
+    conn.execute(
+        "UPDATE week_participants SET current_balance = 1200 WHERE user_id = 1 AND week_id = ?",
+        (week1,),
+    )
+    conn.execute(
+        "UPDATE week_participants SET current_balance = 900 WHERE user_id = 1 AND week_id = ?",
+        (week2,),
+    )
+    conn.commit()
+
+    rows = repository.season_money_leaderboard(conn)
+    assert rows[0]["user_id"] == 1
+    assert rows[0]["net"] == pytest.approx(100.0)  # +200 week1, -100 week2
+
+
+def test_get_user_parlay_record_counts_by_result(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(conn, week_id, [make_game()])
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    repository.insert_odds_snapshot(conn, game["id"], make_odds_event(), flipped=False)
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+
+    parlay_id = repository.start_parlay(conn, 7, week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "spread", "home", -6.5, -110)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 190.91)
+    repository.grade_parlay_result(conn, parlay_id, "win", 190.91)
+    conn.commit()
+
+    record = repository.get_user_parlay_record(conn, 7)
+    assert record == {"win": 1}
+
+
+def test_get_week_and_list_all_weeks(conn):
+    week1 = repository.upsert_week(conn, 2026, 1, "regular")
+    week2 = repository.upsert_week(conn, 2026, 2, "regular")
+
+    assert repository.get_week(conn, week1)["week_number"] == 1
+    weeks = repository.list_all_weeks(conn)
+    assert [w["id"] for w in weeks] == [week2, week1]

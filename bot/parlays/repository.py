@@ -251,7 +251,8 @@ def list_legs(conn: sqlite3.Connection, parlay_id: int) -> list[sqlite3.Row]:
 def list_legs_with_games(conn: sqlite3.Connection, parlay_id: int) -> list[sqlite3.Row]:
     return conn.execute(
         """
-        SELECT parlay_legs.*, games.home_team, games.away_team, games.start_time_utc
+        SELECT parlay_legs.*, games.home_team, games.away_team, games.start_time_utc,
+               games.status AS game_status, games.home_score, games.away_score
         FROM parlay_legs
         JOIN games ON games.id = parlay_legs.game_id
         WHERE parlay_legs.parlay_id = ?
@@ -379,3 +380,123 @@ def lock_parlay(conn: sqlite3.Connection, parlay_id: int) -> None:
         (parlay_id,),
     )
     conn.commit()
+
+
+# --- grading ---
+
+
+def list_gradable_parlays(conn: sqlite3.Connection, week_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM parlays WHERE week_id = ? AND status IN ('submitted', 'locked')",
+        (week_id,),
+    ).fetchall()
+
+
+def grade_leg_result(conn: sqlite3.Connection, leg_id: int, result: str) -> None:
+    conn.execute(
+        "UPDATE parlay_legs SET result = ?, graded_at = datetime('now') WHERE id = ?",
+        (result, leg_id),
+    )
+
+
+def grade_parlay_result(
+    conn: sqlite3.Connection, parlay_id: int, result: str, actual_payout_dollars: float
+) -> None:
+    conn.execute(
+        "UPDATE parlays SET status = 'graded', result = ?, actual_payout_dollars = ? WHERE id = ?",
+        (result, actual_payout_dollars, parlay_id),
+    )
+
+
+def credit_balance(conn: sqlite3.Connection, participant_id: int, amount: float) -> None:
+    conn.execute(
+        "UPDATE week_participants SET current_balance = current_balance + ? WHERE id = ?",
+        (amount, participant_id),
+    )
+
+
+# --- weekly winner + leaderboards ---
+
+
+def count_pending_parlays(conn: sqlite3.Connection, week_id: int) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM parlays WHERE week_id = ? AND status IN ('submitted', 'locked')",
+        (week_id,),
+    ).fetchone()
+    return row[0]
+
+
+def mark_weekly_winners(conn: sqlite3.Connection, week_id: int) -> list[int]:
+    row = conn.execute(
+        "SELECT MAX(current_balance) AS max_balance FROM week_participants WHERE week_id = ?",
+        (week_id,),
+    ).fetchone()
+    max_balance = row["max_balance"]
+    if max_balance is None:
+        return []
+
+    winners = conn.execute(
+        "SELECT user_id FROM week_participants WHERE week_id = ? AND current_balance = ?",
+        (week_id, max_balance),
+    ).fetchall()
+    conn.execute(
+        "UPDATE week_participants SET is_weekly_winner = 1 WHERE week_id = ? AND current_balance = ?",
+        (week_id, max_balance),
+    )
+    conn.commit()
+    return [winner["user_id"] for winner in winners]
+
+
+def list_week_standings(conn: sqlite3.Connection, week_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM week_participants WHERE week_id = ? ORDER BY current_balance DESC",
+        (week_id,),
+    ).fetchall()
+
+
+def season_wins_leaderboard(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT user_id, COUNT(*) AS wins FROM week_participants WHERE is_weekly_winner = 1 "
+        "GROUP BY user_id ORDER BY wins DESC"
+    ).fetchall()
+
+
+def season_money_leaderboard(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT user_id, SUM(current_balance - starting_balance) AS net FROM week_participants "
+        "GROUP BY user_id ORDER BY net DESC"
+    ).fetchall()
+
+
+def get_user_weekly_win_count(conn: sqlite3.Connection, user_id: int) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM week_participants WHERE user_id = ? AND is_weekly_winner = 1",
+        (user_id,),
+    ).fetchone()
+    return row[0]
+
+
+def get_user_season_net(conn: sqlite3.Connection, user_id: int) -> float:
+    row = conn.execute(
+        "SELECT COALESCE(SUM(current_balance - starting_balance), 0) FROM week_participants "
+        "WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    return row[0]
+
+
+def get_user_parlay_record(conn: sqlite3.Connection, user_id: int) -> dict[str, int]:
+    rows = conn.execute(
+        "SELECT result, COUNT(*) AS n FROM parlays WHERE user_id = ? AND status = 'graded' "
+        "GROUP BY result",
+        (user_id,),
+    ).fetchall()
+    return {row["result"]: row["n"] for row in rows}
+
+
+def get_week(conn: sqlite3.Connection, week_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM weeks WHERE id = ?", (week_id,)).fetchone()
+
+
+def list_all_weeks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM weeks ORDER BY id DESC").fetchall()
