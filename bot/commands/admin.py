@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.integrations import team_aliases
-from bot.parlays import repository
+from bot.parlays import locking, repository
 
 SEASON_TYPE_CHOICES = [
     app_commands.Choice(name="regular", value="regular"),
@@ -85,6 +85,30 @@ class AdminCog(commands.GroupCog, name="admin"):
         )
         await interaction.response.send_message(
             f"Mapped '{source_team}' -> '{canonical_team}'.", ephemeral=True
+        )
+
+    @app_commands.command(
+        name="lock-check",
+        description="Lock submitted parlays past kickoff and expire stale drafts",
+    )
+    async def lock_check_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        result = locking.lock_check(self.bot.conn)
+
+        for user_id, parlay_id in result["expired_drafts"]:
+            try:
+                user = await self.bot.fetch_user(user_id)
+                await user.send(
+                    f"Your draft parlay #{parlay_id} was cancelled - one of its games "
+                    "kicked off before you submitted."
+                )
+            except discord.HTTPException:
+                pass  # best-effort DM; a closed DM or unknown user shouldn't fail the job
+
+        await interaction.followup.send(
+            f"Locked {len(result['locked'])} parlay(s), "
+            f"expired {len(result['expired_drafts'])} stale draft(s).",
+            ephemeral=True,
         )
 
 

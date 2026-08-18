@@ -15,6 +15,9 @@ logger = logging.getLogger("degen_bot")
 EXTENSIONS = (
     "bot.commands.admin",
     "bot.commands.board",
+    "bot.commands.bankroll",
+    "bot.commands.parlay",
+    "bot.commands.leaderboard",
 )
 
 

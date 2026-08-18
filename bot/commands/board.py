@@ -2,13 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.parlays import repository
-
-
-def _format_price(price: int | None) -> str:
-    if price is None:
-        return "?"
-    return f"+{price}" if price > 0 else str(price)
+from bot.parlays import formatting, repository
 
 
 def _format_odds_line(snapshot) -> str:
@@ -18,12 +12,12 @@ def _format_odds_line(snapshot) -> str:
     parts = []
     if snapshot["spread_home"] is not None:
         parts.append(
-            f"spread {snapshot['spread_home']:+g} ({_format_price(snapshot['spread_price_home'])})"
+            f"spread {snapshot['spread_home']:+g} ({formatting.format_price(snapshot['spread_price_home'])})"
         )
     if snapshot["total_points"] is not None:
         parts.append(f"O/U {snapshot['total_points']:g}")
     if snapshot["moneyline_home"] is not None:
-        parts.append(f"ML {_format_price(snapshot['moneyline_home'])}")
+        parts.append(f"ML {formatting.format_price(snapshot['moneyline_home'])}")
     return " | ".join(parts) if parts else "no lines cached yet"
 
 

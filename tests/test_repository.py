@@ -1,3 +1,5 @@
+import pytest
+
 from bot.integrations import team_aliases
 from bot.integrations.cfbd_client import CfbdGame
 from bot.integrations.odds_client import OddsEvent
@@ -164,3 +166,134 @@ def test_get_latest_odds_snapshot_returns_most_recent(conn):
 
     snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
     assert snapshot["spread_home"] == -3.0
+
+
+def setup_week_game_and_snapshot(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(conn, week_id, [make_game()])
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    repository.insert_odds_snapshot(conn, game["id"], make_odds_event(), flipped=False)
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
+    return week_id, game, snapshot
+
+
+# --- bankroll ---
+
+
+def test_opt_in_creates_participant_at_1000(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    assert participant["starting_balance"] == 1000
+    assert participant["current_balance"] == 1000
+
+
+def test_get_participant_returns_none_before_optin(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    assert repository.get_participant(conn, user_id=7, week_id=week_id) is None
+
+
+# --- parlay lifecycle ---
+
+
+def test_start_parlay_creates_draft(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    parlay_id = repository.start_parlay(conn, user_id=7, week_id=week_id)
+    parlay = repository.get_parlay(conn, parlay_id)
+    assert parlay["status"] == "draft"
+
+
+def test_only_one_draft_per_user_week_is_enforced_at_db_level(conn):
+    import sqlite3
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.start_parlay(conn, user_id=7, week_id=week_id)
+    with pytest.raises(sqlite3.IntegrityError):
+        repository.start_parlay(conn, user_id=7, week_id=week_id)
+
+
+def test_add_leg_and_list_legs(conn):
+    week_id, game, snapshot = setup_week_game_and_snapshot(conn)
+    parlay_id = repository.start_parlay(conn, user_id=7, week_id=week_id)
+
+    leg_number = repository.add_leg(
+        conn, parlay_id, game["id"], snapshot["id"], "spread", "home", -6.5, -110
+    )
+    assert leg_number == 1
+
+    legs = repository.list_legs(conn, parlay_id)
+    assert len(legs) == 1
+    assert legs[0]["market"] == "spread"
+
+
+def test_remove_leg_returns_false_when_not_found(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    parlay_id = repository.start_parlay(conn, user_id=7, week_id=week_id)
+    assert repository.remove_leg(conn, parlay_id, 1) is False
+
+
+def test_cancel_parlay_deletes_parlay_and_legs(conn):
+    week_id, game, snapshot = setup_week_game_and_snapshot(conn)
+    parlay_id = repository.start_parlay(conn, user_id=7, week_id=week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "spread", "home", -6.5, -110)
+
+    repository.cancel_parlay(conn, parlay_id)
+
+    assert repository.get_parlay(conn, parlay_id) is None
+    assert repository.list_legs(conn, parlay_id) == []
+
+
+def test_submit_parlay_debits_balance_and_flips_status(conn):
+    week_id, game, snapshot = setup_week_game_and_snapshot(conn)
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, user_id=7, week_id=week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "spread", "home", -6.5, -110)
+
+    ok = repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 190.91)
+
+    assert ok is True
+    assert repository.get_parlay(conn, parlay_id)["status"] == "submitted"
+    updated = repository.get_participant(conn, user_id=7, week_id=week_id)
+    assert updated["current_balance"] == pytest.approx(900.0)
+
+
+def test_submit_parlay_rejects_wager_exceeding_balance(conn):
+    week_id, game, snapshot = setup_week_game_and_snapshot(conn)
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, user_id=7, week_id=week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "spread", "home", -6.5, -110)
+
+    ok = repository.submit_parlay(conn, parlay_id, participant["id"], 1500.0, 2863.65)
+
+    assert ok is False
+    assert repository.get_parlay(conn, parlay_id)["status"] == "draft"
+    unchanged = repository.get_participant(conn, user_id=7, week_id=week_id)
+    assert unchanged["current_balance"] == 1000
+
+
+def test_list_submitted_parlays_for_week_excludes_drafts(conn):
+    week_id, game, snapshot = setup_week_game_and_snapshot(conn)
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    submitted_id = repository.start_parlay(conn, user_id=7, week_id=week_id)
+    repository.add_leg(conn, submitted_id, game["id"], snapshot["id"], "spread", "home", -6.5, -110)
+    repository.submit_parlay(conn, submitted_id, participant["id"], 100.0, 190.91)
+
+    other_participant = repository.opt_in(conn, user_id=8, week_id=week_id)
+    repository.start_parlay(conn, user_id=8, week_id=week_id)  # still a draft
+
+    parlays = repository.list_submitted_parlays_for_week(conn, week_id)
+    assert [p["id"] for p in parlays] == [submitted_id]
+
+
+def test_week_is_visible_false_before_any_leg_has_started(conn):
+    week_id, game, snapshot = setup_week_game_and_snapshot(conn)
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, user_id=7, week_id=week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "spread", "home", -6.5, -110)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 190.91)
+
+    assert repository.week_is_visible(conn, week_id) is False
+
+
+def test_week_is_visible_false_with_no_submitted_parlays(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    assert repository.week_is_visible(conn, week_id) is False

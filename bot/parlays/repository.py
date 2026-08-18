@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from bot.integrations import team_aliases
 from bot.integrations.cfbd_client import CfbdGame
 from bot.integrations.odds_client import OddsEvent
+from bot.parlays import timeutils
 
 
 def upsert_week(
@@ -171,3 +172,210 @@ def get_latest_odds_snapshot(conn: sqlite3.Connection, game_id: int) -> sqlite3.
         "SELECT * FROM odds_snapshots WHERE game_id = ? ORDER BY fetched_at DESC, id DESC LIMIT 1",
         (game_id,),
     ).fetchone()
+
+
+def get_game(conn: sqlite3.Connection, game_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
+
+
+def search_games(
+    conn: sqlite3.Connection, week_id: int, query: str, limit: int = 25
+) -> list[sqlite3.Row]:
+    like = f"%{query}%"
+    return conn.execute(
+        """
+        SELECT * FROM games WHERE week_id = ? AND (home_team LIKE ? OR away_team LIKE ?)
+        ORDER BY start_time_utc LIMIT ?
+        """,
+        (week_id, like, like, limit),
+    ).fetchall()
+
+
+# --- weekly bankroll ---
+
+
+def get_participant(
+    conn: sqlite3.Connection, user_id: int, week_id: int
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM week_participants WHERE user_id = ? AND week_id = ?",
+        (user_id, week_id),
+    ).fetchone()
+
+
+def opt_in(conn: sqlite3.Connection, user_id: int, week_id: int) -> sqlite3.Row:
+    conn.execute(
+        "INSERT INTO week_participants (user_id, week_id) VALUES (?, ?)", (user_id, week_id)
+    )
+    conn.commit()
+    return get_participant(conn, user_id, week_id)
+
+
+# --- parlays ---
+
+
+def get_draft_parlay(
+    conn: sqlite3.Connection, user_id: int, week_id: int
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM parlays WHERE user_id = ? AND week_id = ? AND status = 'draft'",
+        (user_id, week_id),
+    ).fetchone()
+
+
+def start_parlay(conn: sqlite3.Connection, user_id: int, week_id: int) -> int:
+    cursor = conn.execute(
+        "INSERT INTO parlays (user_id, week_id, status) VALUES (?, ?, 'draft')",
+        (user_id, week_id),
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def cancel_parlay(conn: sqlite3.Connection, parlay_id: int) -> None:
+    conn.execute("DELETE FROM parlay_legs WHERE parlay_id = ?", (parlay_id,))
+    conn.execute("DELETE FROM parlays WHERE id = ?", (parlay_id,))
+    conn.commit()
+
+
+def get_parlay(conn: sqlite3.Connection, parlay_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM parlays WHERE id = ?", (parlay_id,)).fetchone()
+
+
+def list_legs(conn: sqlite3.Connection, parlay_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM parlay_legs WHERE parlay_id = ? ORDER BY leg_number", (parlay_id,)
+    ).fetchall()
+
+
+def list_legs_with_games(conn: sqlite3.Connection, parlay_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT parlay_legs.*, games.home_team, games.away_team, games.start_time_utc
+        FROM parlay_legs
+        JOIN games ON games.id = parlay_legs.game_id
+        WHERE parlay_legs.parlay_id = ?
+        ORDER BY parlay_legs.leg_number
+        """,
+        (parlay_id,),
+    ).fetchall()
+
+
+def add_leg(
+    conn: sqlite3.Connection,
+    parlay_id: int,
+    game_id: int,
+    odds_snapshot_id: int,
+    market: str,
+    selection: str,
+    line_value: float | None,
+    price_american: int,
+) -> int:
+    leg_number = conn.execute(
+        "SELECT COALESCE(MAX(leg_number), 0) + 1 FROM parlay_legs WHERE parlay_id = ?",
+        (parlay_id,),
+    ).fetchone()[0]
+    conn.execute(
+        """
+        INSERT INTO parlay_legs (
+            parlay_id, leg_number, game_id, odds_snapshot_id,
+            market, selection, line_value, price_american
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (parlay_id, leg_number, game_id, odds_snapshot_id, market, selection, line_value, price_american),
+    )
+    conn.commit()
+    return leg_number
+
+
+def remove_leg(conn: sqlite3.Connection, parlay_id: int, leg_number: int) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM parlay_legs WHERE parlay_id = ? AND leg_number = ?",
+        (parlay_id, leg_number),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def submit_parlay(
+    conn: sqlite3.Connection,
+    parlay_id: int,
+    participant_id: int,
+    wager_dollars: float,
+    potential_payout_dollars: float,
+) -> bool:
+    """Atomically debits the bankroll and flips the parlay to 'submitted'. Returns
+    False (no changes made) if the wager exceeds the participant's current balance -
+    the balance check and the debit happen in the same guarded UPDATE so two
+    near-simultaneous submits can't overdraw the bankroll."""
+    cursor = conn.execute(
+        "UPDATE week_participants SET current_balance = current_balance - ? "
+        "WHERE id = ? AND current_balance >= ?",
+        (wager_dollars, participant_id, wager_dollars),
+    )
+    if cursor.rowcount == 0:
+        conn.rollback()
+        return False
+    conn.execute(
+        "UPDATE parlays SET status = 'submitted', wager_dollars = ?, "
+        "potential_payout_dollars = ?, submitted_at = datetime('now') WHERE id = ?",
+        (wager_dollars, potential_payout_dollars, parlay_id),
+    )
+    conn.commit()
+    return True
+
+
+def list_parlays_for_user_week(
+    conn: sqlite3.Connection, user_id: int, week_id: int
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM parlays WHERE user_id = ? AND week_id = ? ORDER BY created_at",
+        (user_id, week_id),
+    ).fetchall()
+
+
+def list_submitted_parlays_for_week(
+    conn: sqlite3.Connection, week_id: int
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM parlays WHERE week_id = ? AND status IN ('submitted', 'locked', 'graded') "
+        "ORDER BY user_id, created_at",
+        (week_id,),
+    ).fetchall()
+
+
+def week_is_visible(conn: sqlite3.Connection, week_id: int) -> bool:
+    """True once the earliest-kickoff leg across any submitted parlay this week has
+    started - that's when other members' parlays stop being hidden."""
+    row = conn.execute(
+        """
+        SELECT MIN(games.start_time_utc) AS earliest
+        FROM parlay_legs
+        JOIN parlays ON parlays.id = parlay_legs.parlay_id
+        JOIN games ON games.id = parlay_legs.game_id
+        WHERE parlays.week_id = ? AND parlays.status IN ('submitted', 'locked', 'graded')
+        """,
+        (week_id,),
+    ).fetchone()
+    if row["earliest"] is None:
+        return False
+    return timeutils.parse_utc(row["earliest"]) <= timeutils.utc_now()
+
+
+# --- locking ---
+
+
+def list_lockable_parlays(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM parlays WHERE status = 'submitted'").fetchall()
+
+
+def list_draft_parlays(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM parlays WHERE status = 'draft'").fetchall()
+
+
+def lock_parlay(conn: sqlite3.Connection, parlay_id: int) -> None:
+    conn.execute(
+        "UPDATE parlays SET status = 'locked', locked_at = datetime('now') WHERE id = ?",
+        (parlay_id,),
+    )
+    conn.commit()
