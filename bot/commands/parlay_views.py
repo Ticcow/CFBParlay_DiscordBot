@@ -341,7 +341,7 @@ class SelectionPickerView(discord.ui.View):
             embed, view = render_panel(self.bot, self.parlay_id)
 
             team = {"home": self.game["home_team"], "away": self.game["away_team"]}.get(selection)
-            zinger = zingers.get_zinger(team, interaction.user.display_name)
+            zinger = zingers.get_zinger(team, interaction.user.name)
             if zinger:
                 embed.add_field(name="🔥 Real Talk", value=zinger, inline=False)
 

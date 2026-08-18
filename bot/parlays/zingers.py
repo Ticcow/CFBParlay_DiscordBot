@@ -29,6 +29,13 @@ _ZINGERS: dict[str, list[str]] = {
         "The Knights ride again, courtesy of {user}.",
         "{user} out here representing the Group of 5 with UCF.",
     ],
+    "oklahoma state": [
+        "{user} betting on Oklahoma State? Bold - are we a 40-year-old man about this?",
+        "The Cowboys, {user}? Stillwater's finest, allegedly.",
+        "{user} riding with Oklahoma State. Pistol Pete would be proud.",
+        "{user} out here trusting Oklahoma State with real (fake) money.",
+        "Cowboys up, {user}? We'll see about that.",
+    ],
 }
 _ZINGERS["central florida"] = _ZINGERS["ucf"]
 

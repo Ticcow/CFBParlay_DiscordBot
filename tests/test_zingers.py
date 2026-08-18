@@ -27,6 +27,6 @@ def test_get_zinger_ucf_and_central_florida_share_the_same_jokes():
 
 
 def test_get_zinger_covers_every_advertised_team_with_multiple_lines():
-    for team in ("Purdue", "Ohio State", "Indiana", "UCF"):
+    for team in ("Purdue", "Ohio State", "Indiana", "UCF", "Oklahoma State"):
         seen = {zingers.get_zinger(team, "Alice") for _ in range(30)}
         assert len(seen) > 1, f"expected multiple distinct zingers for {team}"

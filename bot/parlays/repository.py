@@ -485,6 +485,34 @@ def count_pending_parlays(conn: sqlite3.Connection, week_id: int) -> int:
     return row[0]
 
 
+def clear_unused_balance(conn: sqlite3.Connection, week_id: int) -> None:
+    """Once a week's grading is complete, zeroes out any bankroll that was
+    never actually wagered - a participant's final balance becomes exactly
+    what their graded parlays paid back (wins + pushes), not that plus
+    whatever they left untouched. Without this, someone who opts in and bets
+    nothing (or barely anything) would end the week sitting on close to the
+    full $1,000 starting bankroll - easily the "highest balance" in the group
+    despite never having actually bet on anything, which would make them the
+    weekly winner for not playing. Mathematically this reduces to "your final
+    balance is the sum of what your graded parlays returned," since
+    current_balance already equals starting_balance - wagered + returned."""
+    conn.execute(
+        """
+        UPDATE week_participants
+        SET current_balance = COALESCE(
+            (SELECT SUM(actual_payout_dollars) FROM parlays
+             WHERE parlays.user_id = week_participants.user_id
+               AND parlays.week_id = week_participants.week_id
+               AND parlays.status = 'graded'),
+            0
+        )
+        WHERE week_id = ?
+        """,
+        (week_id,),
+    )
+    conn.commit()
+
+
 def mark_weekly_winners(conn: sqlite3.Connection, week_id: int) -> list[int]:
     row = conn.execute(
         "SELECT MAX(current_balance) AS max_balance FROM week_participants WHERE week_id = ?",

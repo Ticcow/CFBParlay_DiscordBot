@@ -565,3 +565,57 @@ def test_set_state_updates_existing_value(conn):
     repository.set_state(conn, "some_key", "first")
     repository.set_state(conn, "some_key", "second")
     assert repository.get_state(conn, "some_key") == "second"
+
+
+# --- clear_unused_balance ---
+
+
+def _final_game_and_snapshot(conn, week_id):
+    repository.upsert_games(
+        conn,
+        week_id,
+        [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 24, 17)],  # home wins
+    )
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    repository.insert_odds_snapshot(conn, game["id"], make_odds_event(), flipped=False)
+    return game, repository.get_latest_odds_snapshot(conn, game["id"])
+
+
+def test_clear_unused_balance_zeroes_a_participant_who_never_wagered(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+
+    repository.clear_unused_balance(conn, week_id)
+
+    assert repository.get_participant(conn, 1, week_id)["current_balance"] == 0
+
+
+def test_clear_unused_balance_keeps_exactly_the_winning_payout(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    game, snapshot = _final_game_and_snapshot(conn, week_id)
+    participant = repository.opt_in(conn, user_id=1, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 1, week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 166.67)
+    repository.grade_parlay_result(conn, parlay_id, "win", 166.67)
+    repository.credit_balance(conn, participant["id"], 166.67)
+    # balance is now 1000 - 100 (wagered) + 166.67 (won) = 1066.67, with $800 never touched
+
+    repository.clear_unused_balance(conn, week_id)
+
+    assert repository.get_participant(conn, 1, week_id)["current_balance"] == 166.67
+
+
+def test_clear_unused_balance_leaves_a_lost_wager_at_zero_not_negative(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    game, snapshot = _final_game_and_snapshot(conn, week_id)
+    participant = repository.opt_in(conn, user_id=1, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 1, week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "moneyline", "away", None, 130)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 200.0, 460.0)
+    repository.grade_parlay_result(conn, parlay_id, "loss", 0.0)
+    # balance is 1000 - 200 (wagered and lost) = 800, all of it untouched-or-lost
+
+    repository.clear_unused_balance(conn, week_id)
+
+    assert repository.get_participant(conn, 1, week_id)["current_balance"] == 0

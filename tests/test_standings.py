@@ -1,6 +1,6 @@
 from bot.integrations.cfbd_client import CfbdGame
 from bot.integrations.odds_client import OddsEvent
-from bot.parlays import repository, standings
+from bot.parlays import grading, repository, standings
 
 
 def _sync_game(conn, week_id, cfbd_game_id, home, away, status, home_score=None, away_score=None):
@@ -39,19 +39,20 @@ def test_finalize_week_returns_empty_while_parlays_still_pending(conn):
 
 def test_finalize_week_marks_the_highest_balance_as_winner(conn):
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
-    repository.opt_in(conn, user_id=1, week_id=week_id)
-    repository.opt_in(conn, user_id=2, week_id=week_id)
+    game = _sync_game(conn, week_id, 1, "Texas", "Ohio State", "final", 24, 17)
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
 
-    conn.execute(
-        "UPDATE week_participants SET current_balance = 1200 WHERE user_id = 1 AND week_id = ?",
-        (week_id,),
-    )
-    conn.execute(
-        "UPDATE week_participants SET current_balance = 800 WHERE user_id = 2 AND week_id = ?",
-        (week_id,),
-    )
-    conn.commit()
+    participant1 = repository.opt_in(conn, user_id=1, week_id=week_id)
+    parlay1 = repository.start_parlay(conn, 1, week_id)
+    repository.add_leg(conn, parlay1, game["id"], snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay1, participant1["id"], 500.0, 833.33)
 
+    participant2 = repository.opt_in(conn, user_id=2, week_id=week_id)
+    parlay2 = repository.start_parlay(conn, 2, week_id)
+    repository.add_leg(conn, parlay2, game["id"], snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay2, participant2["id"], 100.0, 166.67)
+
+    grading.grade_week(conn, week_id)
     winners = standings.finalize_week(conn, week_id)
 
     assert winners == [1]
@@ -61,11 +62,35 @@ def test_finalize_week_marks_the_highest_balance_as_winner(conn):
     assert p2["is_weekly_winner"] == 0
 
 
+def test_finalize_week_clears_unwagered_balance_so_sitting_out_cannot_win(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    game = _sync_game(conn, week_id, 1, "Texas", "Ohio State", "final", 24, 17)  # home wins
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
+
+    # user 1 opts in but never wagers a dime - still shows the full untouched $1,000
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+
+    # user 2 wagers $100 on the winning side and actually turns it into real profit
+    participant2 = repository.opt_in(conn, user_id=2, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 2, week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay_id, participant2["id"], 100.0, 166.67)
+
+    grading.grade_week(conn, week_id)
+    winners = standings.finalize_week(conn, week_id)
+
+    assert winners == [2]
+    p1 = repository.get_participant(conn, 1, week_id)
+    p2 = repository.get_participant(conn, 2, week_id)
+    assert p1["current_balance"] == 0  # untouched $1,000 gets cleared entirely
+    assert p2["current_balance"] == 166.67  # exactly what the winning parlay paid back
+
+
 def test_finalize_week_splits_a_tie(conn):
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     repository.opt_in(conn, user_id=1, week_id=week_id)
     repository.opt_in(conn, user_id=2, week_id=week_id)
-    # both stay at the default $1,000 - a tie
+    # neither wagered anything, so both get cleared down to $0 - still a tie
 
     winners = standings.finalize_week(conn, week_id)
 
