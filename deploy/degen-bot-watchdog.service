@@ -6,4 +6,4 @@ After=degen-bot.service
 # Runs as root (no User= override): reset-failed/start on another system
 # unit needs privileges a plain user account doesn't have.
 Type=oneshot
-ExecStart=/home/lpsteiner/degen-bot/deploy/watchdog_degen_bot.sh
+ExecStart=/home/pi/degen-bot/deploy/watchdog_degen_bot.sh

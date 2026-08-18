@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=lpsteiner
-WorkingDirectory=/home/lpsteiner/degen-bot
-EnvironmentFile=/home/lpsteiner/degen-bot/.env
-ExecStart=/home/lpsteiner/degen-bot/.venv/bin/python -m bot.main
+User=pi
+WorkingDirectory=/home/pi/degen-bot
+EnvironmentFile=/home/pi/degen-bot/.env
+ExecStart=/home/pi/degen-bot/.venv/bin/python -m bot.main
 Restart=always
 RestartSec=5
 
