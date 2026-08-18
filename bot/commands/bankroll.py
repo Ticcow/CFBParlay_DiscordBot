@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.commands import status_panel
 from bot.parlays import repository
 
 
@@ -26,8 +27,10 @@ class BankrollCog(commands.Cog):
 
         repository.opt_in(self.bot.conn, interaction.user.id, week["id"])
         await interaction.response.send_message(
-            f"You're in for Week {week['week_number']}! Starting bankroll: $1,000.00"
+            f"You're in for Week {week['week_number']}! Starting bankroll: $1,000.00",
+            ephemeral=True,
         )
+        await status_panel.refresh(self.bot)
 
     @app_commands.command(
         name="balance", description="Show your current-week bankroll and parlays"

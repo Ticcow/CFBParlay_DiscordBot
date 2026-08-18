@@ -55,7 +55,7 @@ class BoardCog(commands.Cog):
                 value=f"{game['start_time_utc']}{score}\n{_format_odds_line(snapshot)}",
                 inline=False,
             )
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

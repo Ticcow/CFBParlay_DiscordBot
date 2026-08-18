@@ -89,7 +89,7 @@ class LeaderboardCog(commands.Cog):
             for i, row in enumerate(rows, start=1):
                 crown = " 🏆" if row["is_weekly_winner"] else ""
                 lines.append(f"{i}. <@{row['user_id']}> — ${row['current_balance']:.2f}{crown}")
-            await interaction.response.send_message("\n".join(lines))
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
             return
 
         if scope_value == "season-wins":
@@ -108,7 +108,7 @@ class LeaderboardCog(commands.Cog):
         if not rows:
             await interaction.response.send_message("No season data yet.", ephemeral=True)
             return
-        await interaction.response.send_message("\n".join(lines))
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @app_commands.command(name="mystats", description="View your season record")
     async def mystats(self, interaction: discord.Interaction):
@@ -147,7 +147,7 @@ class LeaderboardCog(commands.Cog):
         for i, row in enumerate(rows, start=1):
             crown = " 🏆" if row["is_weekly_winner"] else ""
             lines.append(f"{i}. <@{row['user_id']}> — ${row['current_balance']:.2f}{crown}")
-        await interaction.response.send_message("\n".join(lines))
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @history.autocomplete("week")
     async def history_week_autocomplete(self, interaction: discord.Interaction, current: str):

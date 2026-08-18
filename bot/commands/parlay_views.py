@@ -2,6 +2,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from bot.commands import status_panel
 from bot.parlays import formatting, payout, repository, selections, timeutils
 
 MIN_LEGS = 3
@@ -496,6 +497,7 @@ class ConfirmSubmitView(discord.ui.View):
             description=f"Wager ${self.wager:.2f}, potential payout ${self.potential:.2f}.",
         )
         await interaction.response.edit_message(embed=embed, view=None)
+        await status_panel.refresh(self.bot)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button):

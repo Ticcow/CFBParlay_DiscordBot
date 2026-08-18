@@ -6,6 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from bot.commands import status_panel
 from bot.parlays import grading, locking, repository, standings, timeutils
 from bot.scheduler import season
 
@@ -39,6 +40,7 @@ async def sync_week_games(bot) -> int | None:
             f"📅 Week {target.week} ({target.season_type}) is open - {len(games)} games "
             "synced. Use /optin to join!"
         )
+    await status_panel.refresh(bot)
     return week_id
 
 
@@ -61,6 +63,11 @@ async def lock_check_job(bot) -> dict:
             )
         except discord.HTTPException:
             pass  # best-effort DM; a closed DM or unknown user shouldn't fail the job
+
+    # only refresh when something actually changed - this runs every 5 min, and
+    # reposting an unchanged panel every cycle would just be noise
+    if result["locked"] or result["expired_drafts"]:
+        await status_panel.refresh(bot)
     return result
 
 
@@ -78,6 +85,8 @@ async def grade_week_job(bot) -> dict:
             crown = " 🏆" if row["is_weekly_winner"] else ""
             lines.append(f"{i}. <@{row['user_id']}> — ${row['current_balance']:.2f}{crown}")
         await bot.announce("\n".join(lines))
+    if result["graded"]:
+        await status_panel.refresh(bot)
     return result
 
 

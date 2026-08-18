@@ -4,6 +4,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.commands import status_panel
 from bot.integrations import team_aliases
 from bot.integrations.cfbd_client import CfbdGame, RankedTeam
 from bot.integrations.odds_client import OddsEvent
@@ -255,6 +256,7 @@ class AdminCog(commands.GroupCog, name="admin"):
             "/admin test-teardown when you're done.",
             ephemeral=True,
         )
+        await status_panel.refresh(self.bot)
 
     @app_commands.command(
         name="test-finish-game",
@@ -308,6 +310,14 @@ class AdminCog(commands.GroupCog, name="admin"):
         await interaction.response.send_message(
             f"Test week removed ({removed} games deleted along with it).", ephemeral=True
         )
+        await status_panel.refresh(self.bot)
+
+    @app_commands.command(
+        name="refresh-panel", description="Manually repost the week status panel"
+    )
+    async def refresh_panel_cmd(self, interaction: discord.Interaction):
+        await status_panel.refresh(self.bot)
+        await interaction.response.send_message("Panel refreshed.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
