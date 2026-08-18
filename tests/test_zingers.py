@@ -1,0 +1,32 @@
+from bot.parlays import zingers
+
+
+def test_get_zinger_returns_none_for_unknown_team():
+    assert zingers.get_zinger("Rice", "Alice") is None
+
+
+def test_get_zinger_returns_none_for_none_team():
+    assert zingers.get_zinger(None, "Alice") is None
+
+
+def test_get_zinger_formats_username_into_the_line():
+    result = zingers.get_zinger("Purdue", "Alice", choice_fn=lambda options: options[0])
+    assert result == "That's a bold strategy, Alice — betting on Purdue."
+
+
+def test_get_zinger_is_case_insensitive():
+    result = zingers.get_zinger("purdue", "Alice", choice_fn=lambda options: options[0])
+    assert result is not None
+    assert "Alice" in result
+
+
+def test_get_zinger_ucf_and_central_florida_share_the_same_jokes():
+    ucf = zingers.get_zinger("UCF", "Bob", choice_fn=lambda options: options[0])
+    central_florida = zingers.get_zinger("Central Florida", "Bob", choice_fn=lambda options: options[0])
+    assert ucf == central_florida
+
+
+def test_get_zinger_covers_every_advertised_team_with_multiple_lines():
+    for team in ("Purdue", "Ohio State", "Indiana", "UCF"):
+        seen = {zingers.get_zinger(team, "Alice") for _ in range(30)}
+        assert len(seen) > 1, f"expected multiple distinct zingers for {team}"

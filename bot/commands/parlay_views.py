@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from bot.commands import status_panel
-from bot.parlays import formatting, payout, repository, selections, timeutils
+from bot.parlays import formatting, payout, repository, selections, timeutils, zingers
 
 MIN_LEGS = 3
 MAX_LEGS = 6
@@ -339,6 +339,12 @@ class SelectionPickerView(discord.ui.View):
                 self.market, selection, line_value, price,
             )
             embed, view = render_panel(self.bot, self.parlay_id)
+
+            team = {"home": self.game["home_team"], "away": self.game["away_team"]}.get(selection)
+            zinger = zingers.get_zinger(team, interaction.user.display_name)
+            if zinger:
+                embed.add_field(name="🔥 Real Talk", value=zinger, inline=False)
+
             await interaction.response.edit_message(embed=embed, view=view)
 
         return callback
