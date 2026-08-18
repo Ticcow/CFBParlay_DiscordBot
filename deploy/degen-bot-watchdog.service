@@ -1,0 +1,9 @@
+[Unit]
+Description=Check degen-bot.service is running, restart it if not
+After=degen-bot.service
+
+[Service]
+# Runs as root (no User= override): reset-failed/start on another system
+# unit needs privileges a plain user account doesn't have.
+Type=oneshot
+ExecStart=/home/lpsteiner/degen-bot/deploy/watchdog_degen_bot.sh

@@ -1,0 +1,16 @@
+[Unit]
+Description=Degen Bot (CFB Parlay Discord Bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lpsteiner
+WorkingDirectory=/home/lpsteiner/degen-bot
+EnvironmentFile=/home/lpsteiner/degen-bot/.env
+ExecStart=/home/lpsteiner/degen-bot/.venv/bin/python -m bot.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
