@@ -267,60 +267,10 @@ class AdminCog(commands.GroupCog, name="admin"):
             "some in hours/a day) and Top 25 rankings - it's now the latest week, so /board, "
             "/optin, /parlay start, etc. all use it. Once you've placed some bets, run "
             "/admin test-finish-week to auto-finish every remaining game with random scores and "
-            "grade the whole week in one shot (or /admin test-finish-game to control one game's "
-            "score yourself). Run /admin test-teardown when you're done.",
+            "grade the whole week in one shot. Run /admin test-teardown when you're done.",
             ephemeral=True,
         )
         await status_panel.refresh(self.bot)
-
-    @app_commands.command(
-        name="test-finish-game",
-        description="[TEST] Force a test-week game to final with a specific score, to test grading on demand",
-    )
-    @app_commands.describe(
-        game="Which game", home_score="Home team's final score", away_score="Away team's final score"
-    )
-    async def test_finish_game(
-        self, interaction: discord.Interaction, game: str, home_score: int, away_score: int
-    ):
-        week = _get_test_week(self.bot)
-        if week is None:
-            await interaction.response.send_message(
-                "No test week found - run /admin test-seed first.", ephemeral=True
-            )
-            return
-        try:
-            game_id = int(game)
-        except ValueError:
-            await interaction.response.send_message(
-                "Pick a game from the autocomplete list.", ephemeral=True
-            )
-            return
-        game_row = repository.get_game(self.bot.conn, game_id)
-        if game_row is None or game_row["week_id"] != week["id"]:
-            await interaction.response.send_message(
-                "That game isn't part of the test week - this command only touches test data.",
-                ephemeral=True,
-            )
-            return
-        repository.set_game_final_score(self.bot.conn, game_id, home_score, away_score)
-        await interaction.response.send_message(
-            f"Marked game final: {away_score}-{home_score}. Run /admin grade-week to grade it.",
-            ephemeral=True,
-        )
-
-    @test_finish_game.autocomplete("game")
-    async def test_finish_game_autocomplete(self, interaction: discord.Interaction, current: str):
-        week = _get_test_week(self.bot)
-        if week is None:
-            return []
-        games = repository.search_games(self.bot.conn, week["id"], current, limit=25)
-        return [
-            app_commands.Choice(
-                name=f"{g['away_team']} @ {g['home_team']} [{g['status']}]"[:100], value=str(g["id"])
-            )
-            for g in games
-        ]
 
     @app_commands.command(
         name="test-finish-week",
