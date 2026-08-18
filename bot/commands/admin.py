@@ -319,6 +319,15 @@ class AdminCog(commands.GroupCog, name="admin"):
         await status_panel.refresh(self.bot)
         await interaction.response.send_message("Panel refreshed.", ephemeral=True)
 
+    @app_commands.command(
+        name="cleanup-channel",
+        description="Manually delete anything older than 5 min in the panel channel except the panel",
+    )
+    async def cleanup_channel_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        removed = await status_panel.cleanup_channel(self.bot)
+        await interaction.followup.send(f"Removed {removed} message(s).", ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(AdminCog(bot))

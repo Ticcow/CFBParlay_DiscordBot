@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import timedelta
 
 import discord
 
@@ -15,6 +16,11 @@ MAX_BET_FIELDS = 20
 # which wipes the in-memory _panels tracking but leaves the message sitting in
 # the channel). Recent history only - not a full-channel scan.
 _STALE_PANEL_SCAN_LIMIT = 50
+
+# cleanup_channel() deletes anything in the panel channel older than this that
+# isn't the current panel - the channel is meant to be nothing but the panel.
+CLEANUP_AGE = timedelta(minutes=5)
+_CLEANUP_SCAN_LIMIT = 200
 
 _panels: dict[int, discord.Message] = {}
 
@@ -161,3 +167,46 @@ async def refresh(bot) -> None:
                 await old_message.delete()
             except discord.NotFound:
                 pass
+
+
+async def cleanup_channel(bot) -> int:
+    """Deletes anything in the panel channel older than CLEANUP_AGE that isn't
+    the current panel message - the channel is meant to show nothing else.
+    Requires the bot to have Manage Messages there (Send Messages alone only
+    lets a bot delete its own messages, not other members'); if that's missing,
+    logs once and stops rather than retrying every message. Returns how many
+    messages were removed."""
+    if not settings.admin_log_channel_id:
+        return 0
+    channel_id = settings.admin_log_channel_id
+
+    try:
+        channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+    except discord.HTTPException:
+        logger.warning("Failed to fetch panel channel %s", channel_id)
+        return 0
+
+    current_panel = _panels.get(channel_id)
+    cutoff = discord.utils.utcnow() - CLEANUP_AGE
+    removed = 0
+    try:
+        async for message in channel.history(limit=_CLEANUP_SCAN_LIMIT):
+            if current_panel is not None and message.id == current_panel.id:
+                continue
+            if message.created_at > cutoff:
+                continue  # give people a few minutes to actually read it
+            try:
+                await message.delete()
+                removed += 1
+            except discord.Forbidden:
+                logger.warning(
+                    "Missing Manage Messages permission in channel %s - can't clean it up. "
+                    "Grant it in Server Settings > Roles, or as a channel-specific override.",
+                    channel_id,
+                )
+                return removed
+            except discord.HTTPException:
+                pass
+    except discord.HTTPException:
+        logger.warning("Failed to scan channel %s for cleanup", channel_id)
+    return removed

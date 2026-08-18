@@ -1,6 +1,9 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from bot.commands import status_panel
+from bot.config import settings
 from bot.integrations.cfbd_client import CfbdGame
 from bot.integrations.odds_client import OddsEvent
 from bot.parlays import payout, repository, timeutils
@@ -76,3 +79,77 @@ def test_build_embed_shows_bet_details_after_kickoff(conn):
 
     bet_fields = [f for f in embed.fields if "Texas" in f.value or "Texas" in f.name]
     assert bet_fields, "expected a field showing the actual leg details once visible"
+
+
+# --- cleanup_channel ---
+
+
+class FakeCleanupMessage:
+    def __init__(self, message_id, created_at):
+        self.id = message_id
+        self.created_at = created_at
+        self.deleted = False
+
+    async def delete(self):
+        self.deleted = True
+
+
+class FakeCleanupChannel:
+    def __init__(self, messages):
+        self.messages = messages  # newest-first, like real history()
+
+    async def history(self, limit=200):
+        for m in self.messages[:limit]:
+            yield m
+
+
+class FakeCleanupBot:
+    def __init__(self, channel):
+        self._channel = channel
+
+    def get_channel(self, channel_id):
+        return self._channel
+
+    async def fetch_channel(self, channel_id):
+        return self._channel
+
+
+@pytest.fixture
+def panel_channel_configured(monkeypatch):
+    monkeypatch.setattr(settings, "admin_log_channel_id", 555)
+
+
+async def test_cleanup_channel_noop_when_unconfigured(monkeypatch):
+    monkeypatch.setattr(settings, "admin_log_channel_id", None)
+    channel = FakeCleanupChannel([])
+    removed = await status_panel.cleanup_channel(FakeCleanupBot(channel))
+    assert removed == 0
+
+
+async def test_cleanup_channel_deletes_only_messages_older_than_cutoff(panel_channel_configured):
+    now = datetime.now(timezone.utc)
+    old_message = FakeCleanupMessage(1, now - timedelta(minutes=10))
+    fresh_message = FakeCleanupMessage(2, now - timedelta(minutes=1))
+    channel = FakeCleanupChannel([fresh_message, old_message])
+
+    removed = await status_panel.cleanup_channel(FakeCleanupBot(channel))
+
+    assert removed == 1
+    assert old_message.deleted is True
+    assert fresh_message.deleted is False
+
+
+async def test_cleanup_channel_never_deletes_the_current_panel_even_if_old(panel_channel_configured):
+    now = datetime.now(timezone.utc)
+    panel_message = FakeCleanupMessage(1, now - timedelta(minutes=30))
+    other_old_message = FakeCleanupMessage(2, now - timedelta(minutes=10))
+    channel = FakeCleanupChannel([other_old_message, panel_message])
+    status_panel._panels[555] = panel_message
+
+    try:
+        removed = await status_panel.cleanup_channel(FakeCleanupBot(channel))
+        assert removed == 1
+        assert panel_message.deleted is False
+        assert other_old_message.deleted is True
+    finally:
+        status_panel._panels.pop(555, None)

@@ -102,6 +102,10 @@ async def poll_scores(bot) -> None:
         await grade_week_job(bot)
 
 
+async def channel_cleanup_job(bot) -> int:
+    return await status_panel.cleanup_channel(bot)
+
+
 async def api_usage_report_job(bot) -> None:
     rows = repository.get_monthly_api_usage(bot.conn)
     if not rows:
@@ -132,6 +136,7 @@ def register_jobs(bot) -> AsyncIOScheduler:
     scheduler.add_job(_guarded(bot, "fetch_odds", fetch_odds), CronTrigger(day_of_week="tue", hour=9))
     scheduler.add_job(_guarded(bot, "fetch_odds", fetch_odds), CronTrigger(day_of_week="fri", hour=16))
     scheduler.add_job(_guarded(bot, "lock_check", lock_check_job), IntervalTrigger(minutes=5))
+    scheduler.add_job(_guarded(bot, "channel_cleanup", channel_cleanup_job), IntervalTrigger(minutes=5))
     scheduler.add_job(_guarded(bot, "poll_scores", poll_scores), CronTrigger(day_of_week="sat", minute="*/45"))
     scheduler.add_job(_guarded(bot, "poll_scores_daily", poll_scores), CronTrigger(hour=8))
     scheduler.add_job(_guarded(bot, "grade_week_fallback", grade_week_job), CronTrigger(day_of_week="sun", hour=8))
