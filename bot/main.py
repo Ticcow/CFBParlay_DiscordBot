@@ -8,6 +8,7 @@ from bot.config import settings
 from bot.integrations.cfbd_client import CfbdClient
 from bot.integrations.odds_client import OddsClient
 from bot.parlays import repository
+from bot.scheduler import jobs as scheduler_jobs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("degen_bot")
@@ -37,6 +38,8 @@ class DegenBot(commands.Bot):
 
         self.cfbd = CfbdClient(settings.cfbd_api_key, log_usage=log_usage)
         self.odds = OddsClient(settings.odds_api_key, log_usage=log_usage)
+        self.scheduler = None
+        self._scheduler_started = False
 
     async def setup_hook(self):
         for extension in EXTENSIONS:
@@ -53,6 +56,21 @@ class DegenBot(commands.Bot):
 
     async def on_ready(self):
         logger.info("Logged in as %s (id=%s)", self.user, self.user.id)
+        # on_ready can re-fire after a reconnect; only register jobs once per process,
+        # and only once the guild/channel cache is actually populated.
+        if not self._scheduler_started:
+            self.scheduler = scheduler_jobs.register_jobs(self)
+            self._scheduler_started = True
+            logger.info("Scheduler started")
+
+    async def announce(self, message: str) -> None:
+        if not settings.admin_log_channel_id:
+            logger.warning("ADMIN_LOG_CHANNEL_ID not configured; dropped announcement: %s", message)
+            return
+        channel = self.get_channel(settings.admin_log_channel_id)
+        if channel is None:
+            channel = await self.fetch_channel(settings.admin_log_channel_id)
+        await channel.send(message)
 
 
 async def on_app_command_error(

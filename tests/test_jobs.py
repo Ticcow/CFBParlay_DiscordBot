@@ -1,0 +1,175 @@
+from datetime import datetime, timezone
+
+import pytest
+
+from bot.integrations.cfbd_client import CalendarWeek, CfbdGame
+from bot.integrations.odds_client import OddsEvent
+from bot.parlays import repository, timeutils
+from bot.scheduler import jobs
+
+FIXED_NOW = datetime(2026, 8, 28, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def fixed_now(monkeypatch):
+    monkeypatch.setattr(timeutils, "utc_now", lambda: FIXED_NOW)
+
+
+class FakeCfbdClient:
+    def __init__(self):
+        self.calendar = []
+        self.games = []
+
+    async def get_calendar(self, year):
+        return self.calendar
+
+    async def get_games(self, year, week, season_type):
+        return self.games
+
+
+class FakeOddsClient:
+    def __init__(self):
+        self.events = []
+
+    async def get_ncaaf_odds(self):
+        return self.events
+
+
+class FakeUser:
+    def __init__(self, user_id):
+        self.id = user_id
+        self.sent = []
+
+    async def send(self, message):
+        self.sent.append(message)
+
+
+class FakeBot:
+    def __init__(self, conn):
+        self.conn = conn
+        self.cfbd = FakeCfbdClient()
+        self.odds = FakeOddsClient()
+        self.announcements = []
+        self._users = {}
+
+    async def announce(self, message):
+        self.announcements.append(message)
+
+    async def fetch_user(self, user_id):
+        return self._users.setdefault(user_id, FakeUser(user_id))
+
+
+def make_calendar_week():
+    return CalendarWeek(
+        season=2026, week=1, season_type="regular",
+        first_game_start="2026-08-25T00:00:00Z", last_game_start="2026-08-31T23:59:00Z",
+    )
+
+
+async def test_sync_week_games_creates_week_and_announces_once(conn):
+    bot = FakeBot(conn)
+    bot.cfbd.calendar = [make_calendar_week()]
+    bot.cfbd.games = [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "scheduled", None, None)]
+
+    await jobs.sync_week_games(bot)
+
+    assert len(bot.announcements) == 1
+    assert "Week 1" in bot.announcements[0]
+    assert repository.get_latest_week(conn)["week_number"] == 1
+
+    await jobs.sync_week_games(bot)  # re-syncing the same week shouldn't re-announce
+    assert len(bot.announcements) == 1
+
+
+async def test_sync_week_games_noop_when_calendar_has_no_match(conn):
+    bot = FakeBot(conn)  # empty calendar - off-season
+    await jobs.sync_week_games(bot)
+    assert bot.announcements == []
+    assert repository.get_latest_week(conn) is None
+
+
+async def test_fetch_odds_noop_without_a_synced_week(conn):
+    bot = FakeBot(conn)
+    await jobs.fetch_odds(bot)  # should not raise
+
+
+async def test_fetch_odds_syncs_events_for_latest_week(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "scheduled", None, None)]
+    )
+    bot.odds.events = [
+        OddsEvent("Texas", "Ohio State", "2026-08-29T19:00:00Z", "draftkings", moneyline_home=-150, moneyline_away=130)
+    ]
+
+    await jobs.fetch_odds(bot)
+
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    assert repository.get_latest_odds_snapshot(conn, game["id"]) is not None
+
+
+async def test_lock_check_job_dms_owner_of_expired_draft(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2020-01-01T19:00:00Z", "scheduled", None, None)]
+    )
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    event = OddsEvent("Texas", "Ohio State", game["start_time_utc"], "draftkings", moneyline_home=-150, moneyline_away=130)
+    repository.insert_odds_snapshot(conn, game["id"], event, flipped=False)
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
+
+    parlay_id = repository.start_parlay(conn, user_id=42, week_id=week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "moneyline", "home", None, -150)
+
+    result = await jobs.lock_check_job(bot)
+
+    assert result["expired_drafts"] == [(42, parlay_id)]
+    assert len(bot._users[42].sent) == 1
+
+
+async def test_poll_scores_triggers_grading_once_week_is_all_final(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "scheduled", None, None)]
+    )
+    bot.cfbd.games = [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 24, 17)]
+
+    await jobs.poll_scores(bot)
+
+    assert repository.list_games(conn, week_id)[0]["status"] == "final"
+    # grade_week_job ran as a side effect; nobody opted in, so finalize_week has
+    # nothing to mark and posts no announcement - it just shouldn't raise
+    assert bot.announcements == []
+
+
+async def test_api_usage_report_job_noop_with_no_usage(conn):
+    bot = FakeBot(conn)
+    await jobs.api_usage_report_job(bot)
+    assert bot.announcements == []
+
+
+async def test_api_usage_report_job_summarizes_usage(conn):
+    bot = FakeBot(conn)
+    repository.log_api_usage(conn, "cfbd", "/games", 1)
+    repository.log_api_usage(conn, "odds_api", "/v4/sports/x/odds", 3)
+
+    await jobs.api_usage_report_job(bot)
+
+    assert len(bot.announcements) == 1
+    assert "cfbd" in bot.announcements[0]
+    assert "odds_api" in bot.announcements[0]
+
+
+async def test_guarded_job_posts_failure_alert_instead_of_raising(conn):
+    bot = FakeBot(conn)
+
+    async def failing_job(_bot):
+        raise RuntimeError("boom")
+
+    await jobs._guarded(bot, "failing_job", failing_job)()
+
+    assert len(bot.announcements) == 1
+    assert "failing_job" in bot.announcements[0]

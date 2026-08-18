@@ -29,6 +29,25 @@ def _parse_game(raw: dict) -> CfbdGame:
     )
 
 
+@dataclass
+class CalendarWeek:
+    season: int
+    week: int
+    season_type: str
+    first_game_start: str
+    last_game_start: str
+
+
+def _parse_calendar_week(raw: dict) -> CalendarWeek:
+    return CalendarWeek(
+        season=raw["season"],
+        week=raw["week"],
+        season_type=raw["seasonType"],
+        first_game_start=raw["firstGameStart"],
+        last_game_start=raw["lastGameStart"],
+    )
+
+
 class CfbdClient:
     def __init__(self, api_key: str, log_usage=None):
         self._headers = {"Authorization": f"Bearer {api_key}"}
@@ -51,3 +70,11 @@ class CfbdClient:
             if self._log_usage:
                 self._log_usage("cfbd", "/games")
             return [_parse_game(raw) for raw in response.json()]
+
+    async def get_calendar(self, year: int) -> list[CalendarWeek]:
+        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers) as client:
+            response = await client.get("/calendar", params={"year": year})
+            response.raise_for_status()
+            if self._log_usage:
+                self._log_usage("cfbd", "/calendar")
+            return [_parse_calendar_week(raw) for raw in response.json()]

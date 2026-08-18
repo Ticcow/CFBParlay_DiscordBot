@@ -3,7 +3,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.integrations import team_aliases
-from bot.parlays import grading, locking, repository, standings
+from bot.parlays import repository
+from bot.scheduler import jobs as scheduler_jobs
 
 SEASON_TYPE_CHOICES = [
     app_commands.Choice(name="regular", value="regular"),
@@ -93,18 +94,7 @@ class AdminCog(commands.GroupCog, name="admin"):
     )
     async def lock_check_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        result = locking.lock_check(self.bot.conn)
-
-        for user_id, parlay_id in result["expired_drafts"]:
-            try:
-                user = await self.bot.fetch_user(user_id)
-                await user.send(
-                    f"Your draft parlay #{parlay_id} was cancelled - one of its games "
-                    "kicked off before you submitted."
-                )
-            except discord.HTTPException:
-                pass  # best-effort DM; a closed DM or unknown user shouldn't fail the job
-
+        result = await scheduler_jobs.lock_check_job(self.bot)
         await interaction.followup.send(
             f"Locked {len(result['locked'])} parlay(s), "
             f"expired {len(result['expired_drafts'])} stale draft(s).",
@@ -122,8 +112,9 @@ class AdminCog(commands.GroupCog, name="admin"):
             await interaction.followup.send("No week is open yet.", ephemeral=True)
             return
 
-        result = grading.grade_week(self.bot.conn, week["id"])
-        winners = standings.finalize_week(self.bot.conn, week["id"])
+        # any winner announcement is posted to ADMIN_LOG_CHANNEL_ID (same as the
+        # scheduled version of this job), not necessarily this interaction's channel
+        result = await scheduler_jobs.grade_week_job(self.bot)
 
         summary = f"Graded {len(result['graded'])} parlay(s)."
         if result["skipped_incomplete"]:
@@ -132,13 +123,21 @@ class AdminCog(commands.GroupCog, name="admin"):
             )
         await interaction.followup.send(summary, ephemeral=True)
 
-        if winners:
-            standings_rows = repository.list_week_standings(self.bot.conn, week["id"])
-            lines = [f"🏆 Week {week['week_number']} is final!"]
-            for i, row in enumerate(standings_rows, start=1):
-                crown = " 🏆" if row["is_weekly_winner"] else ""
-                lines.append(f"{i}. <@{row['user_id']}> — ${row['current_balance']:.2f}{crown}")
-            await interaction.channel.send("\n".join(lines))
+    @app_commands.command(
+        name="usage-report", description="Show this month's CFBD/Odds API usage"
+    )
+    async def usage_report(self, interaction: discord.Interaction):
+        rows = repository.get_monthly_api_usage(self.bot.conn)
+        if not rows:
+            await interaction.response.send_message(
+                "No API usage recorded yet this month.", ephemeral=True
+            )
+            return
+
+        lines = ["API usage this month:"]
+        for row in rows:
+            lines.append(f"- {row['service']}: {row['total_credits']} credits ({row['calls']} calls)")
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

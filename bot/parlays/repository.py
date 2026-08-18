@@ -500,3 +500,20 @@ def get_week(conn: sqlite3.Connection, week_id: int) -> sqlite3.Row | None:
 
 def list_all_weeks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM weeks ORDER BY id DESC").fetchall()
+
+
+def get_week_by_number(
+    conn: sqlite3.Connection, season_year: int, week_number: int, season_type: str
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM weeks WHERE season_year = ? AND week_number = ? AND season_type = ?",
+        (season_year, week_number, season_type),
+    ).fetchone()
+
+
+def get_monthly_api_usage(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT service, SUM(credits_used) AS total_credits, COUNT(*) AS calls "
+        "FROM api_usage_log WHERE called_at >= datetime('now', 'start of month') "
+        "GROUP BY service ORDER BY service"
+    ).fetchall()
