@@ -421,23 +421,6 @@ def list_submitted_parlays_for_week(
     ).fetchall()
 
 
-def week_is_visible(conn: sqlite3.Connection, week_id: int) -> bool:
-    """True once the earliest-kickoff leg across any submitted parlay this week has
-    started - that's when other members' parlays stop being hidden."""
-    row = conn.execute(
-        """
-        SELECT MIN(games.start_time_utc) AS earliest
-        FROM parlay_legs
-        JOIN parlays ON parlays.id = parlay_legs.parlay_id
-        JOIN games ON games.id = parlay_legs.game_id
-        WHERE parlays.week_id = ? AND parlays.status IN ('submitted', 'locked', 'graded')
-        """,
-        (week_id,),
-    ).fetchone()
-    if row["earliest"] is None:
-        return False
-    return timeutils.parse_utc(row["earliest"]) <= timeutils.utc_now()
-
 
 # --- locking ---
 
@@ -632,3 +615,17 @@ def delete_week_cascade(conn: sqlite3.Connection, week_id: int) -> int:
     conn.execute("DELETE FROM weeks WHERE id = ?", (week_id,))
     conn.commit()
     return game_count
+
+
+def get_state(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM bot_state WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO bot_state (key, value) VALUES (?, ?) "
+        "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()

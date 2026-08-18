@@ -17,37 +17,16 @@ class LeaderboardCog(commands.Cog):
             await interaction.response.send_message("No week is open yet.", ephemeral=True)
             return
 
-        visible = repository.week_is_visible(self.bot.conn, week["id"])
-
-        if user is not None and user.id != interaction.user.id and not visible:
-            await interaction.response.send_message(
-                "Other members' parlays stay hidden until the week's first game kicks off.",
-                ephemeral=True,
-            )
-            return
-
-        if not visible:
-            parlays = [
-                p
-                for p in repository.list_parlays_for_user_week(
-                    self.bot.conn, interaction.user.id, week["id"]
-                )
-                if p["status"] != "draft"
-            ]
-            header = "Your submitted parlays this week (everyone else's stay hidden until kickoff):"
-        else:
-            parlays = [
-                p
-                for p in repository.list_submitted_parlays_for_week(self.bot.conn, week["id"])
-                if user is None or p["user_id"] == user.id
-            ]
-            header = "This week's submitted parlays:"
-
+        parlays = [
+            p
+            for p in repository.list_submitted_parlays_for_week(self.bot.conn, week["id"])
+            if user is None or p["user_id"] == user.id
+        ]
         if not parlays:
             await interaction.response.send_message("No submitted parlays yet.", ephemeral=True)
             return
 
-        lines = [header]
+        lines = ["This week's submitted parlays:"]
         for parlay in parlays:
             legs = repository.list_legs_with_games(self.bot.conn, parlay["id"])
             leg_text = "; ".join(formatting.format_leg(leg) for leg in legs)

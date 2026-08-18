@@ -284,19 +284,6 @@ def test_list_submitted_parlays_for_week_excludes_drafts(conn):
     assert [p["id"] for p in parlays] == [submitted_id]
 
 
-def test_week_is_visible_false_before_any_leg_has_started(conn):
-    week_id, game, snapshot = setup_week_game_and_snapshot(conn)
-    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
-    parlay_id = repository.start_parlay(conn, user_id=7, week_id=week_id)
-    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "spread", "home", -6.5, -110)
-    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 190.91)
-
-    assert repository.week_is_visible(conn, week_id) is False
-
-
-def test_week_is_visible_false_with_no_submitted_parlays(conn):
-    week_id = repository.upsert_week(conn, 2026, 1, "regular")
-    assert repository.week_is_visible(conn, week_id) is False
 
 
 # --- leaderboards / history ---
@@ -560,3 +547,21 @@ def test_delete_week_cascade_removes_everything_under_the_week(conn):
     assert repository.get_participant(conn, 7, week_id) is None
     rankings = conn.execute("SELECT * FROM rankings WHERE week_id = ?", (week_id,)).fetchall()
     assert rankings == []
+
+
+# --- bot_state key/value store ---
+
+
+def test_get_state_returns_none_when_unset(conn):
+    assert repository.get_state(conn, "some_key") is None
+
+
+def test_set_state_then_get_state_round_trips(conn):
+    repository.set_state(conn, "some_key", "some_value")
+    assert repository.get_state(conn, "some_key") == "some_value"
+
+
+def test_set_state_updates_existing_value(conn):
+    repository.set_state(conn, "some_key", "first")
+    repository.set_state(conn, "some_key", "second")
+    assert repository.get_state(conn, "some_key") == "second"

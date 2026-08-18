@@ -169,3 +169,62 @@ def test_grade_week_debits_stay_put_on_loss(conn):
     assert result["graded"] == [(parlay_id, "loss")]
     updated_participant = repository.get_participant(conn, 7, week_id)
     assert updated_participant["current_balance"] == 900.0
+
+
+# --- grade_pending_legs (live, per-leg grading) ---
+
+
+def test_grade_pending_legs_grades_only_the_finished_leg(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    final_game = _sync_game(conn, week_id, 1, "Texas", "Ohio State", "final", 24, 17)
+    pending_game = _sync_game(conn, week_id, 2, "Alabama", "Georgia", "scheduled")
+
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 7, week_id)
+    final_snapshot = repository.get_latest_odds_snapshot(conn, final_game["id"])
+    pending_snapshot = repository.get_latest_odds_snapshot(conn, pending_game["id"])
+    repository.add_leg(conn, parlay_id, final_game["id"], final_snapshot["id"], "moneyline", "home", None, -150)
+    repository.add_leg(conn, parlay_id, pending_game["id"], pending_snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 277.78)
+
+    graded_count = grading.grade_pending_legs(conn, week_id)
+
+    assert graded_count == 1
+    legs = repository.list_legs_with_games(conn, parlay_id)
+    results_by_game = {leg["game_id"]: leg["result"] for leg in legs}
+    assert results_by_game[final_game["id"]] == "win"
+    assert results_by_game[pending_game["id"]] == "pending"
+
+    # the parlay itself is untouched - that's grade_week's job, once every leg is done
+    parlay = repository.get_parlay(conn, parlay_id)
+    assert parlay["status"] == "submitted"
+    participant_after = repository.get_participant(conn, 7, week_id)
+    assert participant_after["current_balance"] == 900.0  # no credit yet
+
+
+def test_grade_pending_legs_does_not_regrade_already_graded_legs(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    final_game = _sync_game(conn, week_id, 1, "Texas", "Ohio State", "final", 24, 17)
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 7, week_id)
+    snapshot = repository.get_latest_odds_snapshot(conn, final_game["id"])
+    repository.add_leg(conn, parlay_id, final_game["id"], snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 166.67)
+
+    first_pass = grading.grade_pending_legs(conn, week_id)
+    second_pass = grading.grade_pending_legs(conn, week_id)
+
+    assert first_pass == 1
+    assert second_pass == 0
+
+
+def test_grade_pending_legs_returns_zero_when_nothing_is_final(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    pending_game = _sync_game(conn, week_id, 1, "Texas", "Ohio State", "scheduled")
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 7, week_id)
+    snapshot = repository.get_latest_odds_snapshot(conn, pending_game["id"])
+    repository.add_leg(conn, parlay_id, pending_game["id"], snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 166.67)
+
+    assert grading.grade_pending_legs(conn, week_id) == 0

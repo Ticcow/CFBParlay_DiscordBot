@@ -40,6 +40,25 @@ def grade_parlay(leg_results: list[str]) -> str:
     return "win"
 
 
+def grade_pending_legs(conn, week_id: int) -> int:
+    """Grades any individual leg whose game just went final, even while other
+    legs on the same parlay are still pending - so people can watch a parlay's
+    legs resolve one at a time throughout the day instead of only finding out
+    anything once the whole parlay's legs (and thus the parlay itself) are
+    done. Never touches the parlay's own status/bankroll - that stays
+    grade_week's job, once every leg on it is actually graded. Returns how
+    many legs were graded."""
+    graded_count = 0
+    for parlay in repository.list_gradable_parlays(conn, week_id):
+        for leg in repository.list_legs_with_games(conn, parlay["id"]):
+            if leg["result"] != "pending" or leg["game_status"] != "final":
+                continue
+            repository.grade_leg_result(conn, leg["id"], grade_leg(leg))
+            graded_count += 1
+    conn.commit()
+    return graded_count
+
+
 def grade_week(conn, week_id: int) -> dict:
     graded = []
     skipped_incomplete = []

@@ -155,6 +155,50 @@ async def test_poll_scores_triggers_grading_once_week_is_all_final(conn):
     assert bot.announcements == []
 
 
+async def test_poll_scores_grades_a_finished_leg_without_finishing_the_whole_week(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn,
+        week_id,
+        [
+            CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "scheduled", None, None),
+            CfbdGame(2, "Alabama", "Georgia", "2026-08-29T19:00:00Z", "scheduled", None, None),
+        ],
+    )
+    texas_game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    bama_game, _ = repository.find_game_by_teams(conn, week_id, "Alabama", "Georgia")
+    for game in (texas_game, bama_game):
+        event = OddsEvent(
+            game["home_team"], game["away_team"], game["start_time_utc"], "draftkings",
+            moneyline_home=-150, moneyline_away=130,
+        )
+        repository.insert_odds_snapshot(conn, game["id"], event, flipped=False)
+
+    participant = repository.opt_in(conn, user_id=42, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 42, week_id)
+    texas_snapshot = repository.get_latest_odds_snapshot(conn, texas_game["id"])
+    bama_snapshot = repository.get_latest_odds_snapshot(conn, bama_game["id"])
+    repository.add_leg(conn, parlay_id, texas_game["id"], texas_snapshot["id"], "moneyline", "home", None, -150)
+    repository.add_leg(conn, parlay_id, bama_game["id"], bama_snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 277.78)
+
+    # only Texas has finished so far; Alabama is still to be played
+    bot.cfbd.games = [
+        CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 24, 17),
+        CfbdGame(2, "Alabama", "Georgia", "2026-08-29T19:00:00Z", "scheduled", None, None),
+    ]
+
+    await jobs.poll_scores(bot)
+
+    legs = repository.list_legs_with_games(conn, parlay_id)
+    results_by_game = {leg["game_id"]: leg["result"] for leg in legs}
+    assert results_by_game[texas_game["id"]] == "win"
+    assert results_by_game[bama_game["id"]] == "pending"
+    # the parlay itself isn't graded yet - Alabama hasn't finished
+    assert repository.get_parlay(conn, parlay_id)["status"] == "submitted"
+
+
 async def test_api_usage_report_job_noop_with_no_usage(conn):
     bot = FakeBot(conn)
     await jobs.api_usage_report_job(bot)

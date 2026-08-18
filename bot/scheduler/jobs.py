@@ -97,6 +97,12 @@ async def poll_scores(bot) -> None:
     games = await bot.cfbd.get_games(week["season_year"], week["week_number"], week["season_type"])
     repository.upsert_games(bot.conn, week["id"], games)
 
+    # grade individual legs as their own game finishes, not just once the whole
+    # week is done - lets people watch a parlay's legs resolve throughout the day
+    graded_legs = grading.grade_pending_legs(bot.conn, week["id"])
+    if graded_legs:
+        await status_panel.refresh(bot)
+
     updated = repository.list_games(bot.conn, week["id"])
     if updated and all(game["status"] == "final" for game in updated):
         await grade_week_job(bot)

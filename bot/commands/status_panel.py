@@ -86,22 +86,28 @@ def _build_embed(bot, week) -> discord.Embed:
         embed.add_field(name="Standings", value="Nobody has opted in yet - use /optin!", inline=False)
 
     submitted = repository.list_submitted_parlays_for_week(bot.conn, week["id"])
-    visible = repository.week_is_visible(bot.conn, week["id"])
     if not submitted:
         embed.add_field(name="Bets", value="No parlays submitted yet.", inline=False)
-    elif not visible:
-        embed.add_field(
-            name="Bets",
-            value=f"{len(submitted)} parlay(s) submitted - picks stay hidden until the first game kicks off.",
-            inline=False,
-        )
     else:
         for parlay in submitted[:MAX_BET_FIELDS]:
             legs = repository.list_legs_with_games(bot.conn, parlay["id"])
             leg_text = "\n".join(formatting.format_leg(leg) for leg in legs)
             wager = f"${parlay['wager_dollars']:.2f}" if parlay["wager_dollars"] is not None else "-"
+
+            if parlay["status"] == "graded":
+                payout_text = f"${parlay['actual_payout_dollars']:.2f} payout"
+                status_label = parlay["result"].upper()
+            else:
+                potential = (
+                    f"${parlay['potential_payout_dollars']:.2f}"
+                    if parlay["potential_payout_dollars"] is not None
+                    else "-"
+                )
+                payout_text = f"{potential} potential"
+                status_label = parlay["status"]
+
             embed.add_field(
-                name=f"<@{parlay['user_id']}> — {wager} [{parlay['status']}]",
+                name=f"<@{parlay['user_id']}> — {wager} wager → {payout_text} [{status_label}]",
                 value=leg_text[:1024],
                 inline=False,
             )

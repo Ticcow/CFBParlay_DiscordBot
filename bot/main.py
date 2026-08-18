@@ -4,7 +4,7 @@ import discord
 from discord.ext import commands
 
 from bot import db as db_module
-from bot.commands import status_panel
+from bot.commands import patch_notes, status_panel
 from bot.config import settings
 from bot.integrations.cfbd_client import CfbdClient
 from bot.integrations.odds_client import OddsClient
@@ -77,6 +77,7 @@ class DegenBot(commands.Bot):
             self.scheduler = scheduler_jobs.register_jobs(self)
             self._scheduler_started = True
             logger.info("Scheduler started")
+            await patch_notes.announce_if_updated(self)
 
     async def announce(self, message: str) -> None:
         if not settings.admin_log_channel_id:

@@ -6,7 +6,7 @@ from bot.commands import status_panel
 from bot.config import settings
 from bot.integrations.cfbd_client import CfbdGame
 from bot.integrations.odds_client import OddsEvent
-from bot.parlays import payout, repository, timeutils
+from bot.parlays import grading, payout, repository, timeutils
 
 
 class FakeBot:
@@ -60,25 +60,39 @@ def _seed_submitted_parlay(conn, start_offset_hours):
     return week_id
 
 
-def test_build_embed_hides_bet_details_before_kickoff(conn):
-    week_id = _seed_submitted_parlay(conn, start_offset_hours=5)  # game hasn't started
+def test_build_embed_shows_bet_details_even_before_kickoff(conn):
+    week_id = _seed_submitted_parlay(conn, start_offset_hours=5)  # game hasn't started yet
     week = repository.get_week(conn, week_id)
 
     embed = status_panel._build_embed(FakeBot(conn), week)
 
-    bets_field = next(f for f in embed.fields if f.name == "Bets")
-    assert "hidden until the first game kicks off" in bets_field.value
-    assert "Texas" not in bets_field.value
+    bet_fields = [f for f in embed.fields if "Texas" in f.value]
+    assert bet_fields, "bets should be visible immediately, not hidden until kickoff"
 
 
-def test_build_embed_shows_bet_details_after_kickoff(conn):
+def test_build_embed_shows_potential_payout_before_grading(conn):
+    week_id = _seed_submitted_parlay(conn, start_offset_hours=5)
+    week = repository.get_week(conn, week_id)
+
+    embed = status_panel._build_embed(FakeBot(conn), week)
+
+    bet_field = next(f for f in embed.fields if "Texas" in f.value)
+    assert "potential" in bet_field.name
+    assert "[submitted]" in bet_field.name
+
+
+def test_build_embed_shows_actual_payout_and_result_once_graded(conn):
     week_id = _seed_submitted_parlay(conn, start_offset_hours=-1)  # game already started
     week = repository.get_week(conn, week_id)
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    repository.set_game_final_score(conn, game["id"], home_score=24, away_score=17)  # Texas (home) wins
+    grading.grade_week(conn, week_id)
 
     embed = status_panel._build_embed(FakeBot(conn), week)
 
-    bet_fields = [f for f in embed.fields if "Texas" in f.value or "Texas" in f.name]
-    assert bet_fields, "expected a field showing the actual leg details once visible"
+    bet_field = next(f for f in embed.fields if "Texas" in f.value)
+    assert "payout" in bet_field.name
+    assert "[WIN]" in bet_field.name
 
 
 # --- cleanup_channel ---

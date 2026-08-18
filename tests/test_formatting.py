@@ -22,6 +22,7 @@ def make_leg(**overrides):
         "price_american": -110,
         "home_team": "Texas",
         "away_team": "Ohio State",
+        "result": "pending",
     }
     leg.update(overrides)
     return leg
@@ -32,6 +33,22 @@ def test_format_leg_spread_home():
     assert "Texas -6.5" in text
     assert "(-110)" in text
     assert "Ohio State @ Texas" in text
+
+
+def test_format_leg_shows_pending_marker_by_default():
+    assert formatting.format_leg(make_leg()).startswith("⏳")
+
+
+def test_format_leg_shows_win_marker():
+    assert formatting.format_leg(make_leg(result="win")).startswith("✅")
+
+
+def test_format_leg_shows_loss_marker():
+    assert formatting.format_leg(make_leg(result="loss")).startswith("❌")
+
+
+def test_format_leg_shows_push_marker():
+    assert formatting.format_leg(make_leg(result="push")).startswith("➖")
 
 
 def test_format_leg_spread_away():
