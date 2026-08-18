@@ -1,3 +1,4 @@
+import random
 from datetime import timedelta
 
 import discord
@@ -34,6 +35,21 @@ TEST_GAMES = [
     (900000006, "Texas", "Rice", 2880),
 ]
 TEST_RANKINGS = [(1, "Georgia"), (2, "Ohio State"), (3, "Alabama"), (4, "Michigan"), (5, "Notre Dame")]
+
+
+def _get_test_week(bot):
+    """The synthetic test week specifically, never "whatever week is latest" -
+    test-only commands must never be able to touch real CFBD-synced data, even
+    if a real week got synced while a test week was still active."""
+    return repository.get_week_by_number(bot.conn, TEST_SEASON_YEAR, TEST_WEEK_NUMBER, TEST_SEASON_TYPE)
+
+
+def _random_final_score() -> tuple[int, int]:
+    home = random.randint(10, 45)
+    away = random.randint(10, 45)
+    while away == home:  # CFB games can't end in a tie
+        away = random.randint(10, 45)
+    return home, away
 
 
 @app_commands.default_permissions(manage_guild=True)
@@ -210,9 +226,7 @@ class AdminCog(commands.GroupCog, name="admin"):
     )
     async def test_seed(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        existing = repository.get_week_by_number(
-            self.bot.conn, TEST_SEASON_YEAR, TEST_WEEK_NUMBER, TEST_SEASON_TYPE
-        )
+        existing = _get_test_week(self.bot)
         if existing:
             repository.delete_week_cascade(self.bot.conn, existing["id"])
 
@@ -251,16 +265,17 @@ class AdminCog(commands.GroupCog, name="admin"):
         await interaction.followup.send(
             f"Seeded a test week with {len(TEST_GAMES)} games (some kick off in minutes, "
             "some in hours/a day) and Top 25 rankings - it's now the latest week, so /board, "
-            "/optin, /parlay start, etc. all use it. Use /admin test-finish-game to force any "
-            "game final with a score of your choosing, then /admin grade-week. Run "
-            "/admin test-teardown when you're done.",
+            "/optin, /parlay start, etc. all use it. Once you've placed some bets, run "
+            "/admin test-finish-week to auto-finish every remaining game with random scores and "
+            "grade the whole week in one shot (or /admin test-finish-game to control one game's "
+            "score yourself). Run /admin test-teardown when you're done.",
             ephemeral=True,
         )
         await status_panel.refresh(self.bot)
 
     @app_commands.command(
         name="test-finish-game",
-        description="[TEST] Force a game to final with a specific score, to test grading on demand",
+        description="[TEST] Force a test-week game to final with a specific score, to test grading on demand",
     )
     @app_commands.describe(
         game="Which game", home_score="Home team's final score", away_score="Away team's final score"
@@ -268,11 +283,24 @@ class AdminCog(commands.GroupCog, name="admin"):
     async def test_finish_game(
         self, interaction: discord.Interaction, game: str, home_score: int, away_score: int
     ):
+        week = _get_test_week(self.bot)
+        if week is None:
+            await interaction.response.send_message(
+                "No test week found - run /admin test-seed first.", ephemeral=True
+            )
+            return
         try:
             game_id = int(game)
         except ValueError:
             await interaction.response.send_message(
                 "Pick a game from the autocomplete list.", ephemeral=True
+            )
+            return
+        game_row = repository.get_game(self.bot.conn, game_id)
+        if game_row is None or game_row["week_id"] != week["id"]:
+            await interaction.response.send_message(
+                "That game isn't part of the test week - this command only touches test data.",
+                ephemeral=True,
             )
             return
         repository.set_game_final_score(self.bot.conn, game_id, home_score, away_score)
@@ -283,7 +311,7 @@ class AdminCog(commands.GroupCog, name="admin"):
 
     @test_finish_game.autocomplete("game")
     async def test_finish_game_autocomplete(self, interaction: discord.Interaction, current: str):
-        week = repository.get_latest_week(self.bot.conn)
+        week = _get_test_week(self.bot)
         if week is None:
             return []
         games = repository.search_games(self.bot.conn, week["id"], current, limit=25)
@@ -295,12 +323,40 @@ class AdminCog(commands.GroupCog, name="admin"):
         ]
 
     @app_commands.command(
+        name="test-finish-week",
+        description="[TEST] Auto-finish every unfinished test-week game with random scores, then grade the week",
+    )
+    async def test_finish_week(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        week = _get_test_week(self.bot)
+        if week is None:
+            await interaction.followup.send(
+                "No test week found - run /admin test-seed first.", ephemeral=True
+            )
+            return
+
+        unfinished = [
+            g for g in repository.list_games(self.bot.conn, week["id"]) if g["status"] != "final"
+        ]
+        for game in unfinished:
+            home_score, away_score = _random_final_score()
+            repository.set_game_final_score(self.bot.conn, game["id"], home_score, away_score)
+
+        await scheduler_jobs.lock_check_job(self.bot)
+        result = await scheduler_jobs.grade_week_job(self.bot)
+
+        await interaction.followup.send(
+            f"Finished {len(unfinished)} game(s) with random scores. Graded "
+            f"{len(result['graded'])} parlay(s); {len(result['skipped_incomplete'])} still waiting "
+            "on other games.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
         name="test-teardown", description="[TEST] Delete the synthetic test week and everything under it"
     )
     async def test_teardown(self, interaction: discord.Interaction):
-        week = repository.get_week_by_number(
-            self.bot.conn, TEST_SEASON_YEAR, TEST_WEEK_NUMBER, TEST_SEASON_TYPE
-        )
+        week = _get_test_week(self.bot)
         if week is None:
             await interaction.response.send_message(
                 "No test week found - nothing to tear down.", ephemeral=True
