@@ -19,22 +19,50 @@ class AdminCog(commands.GroupCog, name="admin"):
         super().__init__()
 
     @app_commands.command(
-        name="sync-week", description="Pull a week's games from CollegeFootballData"
+        name="sync-week",
+        description="Pull the current week's games from CollegeFootballData (or override to a specific week)",
     )
     @app_commands.describe(
-        year="Season year, e.g. 2026",
-        week="Week number",
-        season_type="regular or postseason",
+        year="Override: season year, e.g. 2026 (auto-detected if left blank)",
+        week="Override: week number (auto-detected if left blank)",
+        season_type="Override: regular or postseason (defaults to regular)",
     )
     @app_commands.choices(season_type=SEASON_TYPE_CHOICES)
     async def sync_week(
         self,
         interaction: discord.Interaction,
-        year: int,
-        week: int,
+        year: int | None = None,
+        week: int | None = None,
         season_type: app_commands.Choice[str] | None = None,
     ):
         await interaction.response.defer(ephemeral=True)
+
+        if year is None and week is None:
+            week_id = await scheduler_jobs.sync_week_games(self.bot)
+            if week_id is None:
+                await interaction.followup.send(
+                    "No current CFBD week found - probably off-season, or CFBD hasn't "
+                    "published this year's calendar yet. Use year/week to force a specific one.",
+                    ephemeral=True,
+                )
+                return
+            week_row = repository.get_week(self.bot.conn, week_id)
+            games = repository.list_games(self.bot.conn, week_id)
+            await interaction.followup.send(
+                f"Synced Week {week_row['week_number']} ({week_row['season_type']}, "
+                f"{week_row['season_year']}) - {len(games)} games.",
+                ephemeral=True,
+            )
+            return
+
+        if year is None or week is None:
+            await interaction.followup.send(
+                "Provide both year and week to sync a specific week, or leave both blank "
+                "to auto-sync the current week.",
+                ephemeral=True,
+            )
+            return
+
         season_type_value = season_type.value if season_type else "regular"
         games = await self.bot.cfbd.get_games(year, week, season_type_value)
         week_id = repository.upsert_week(self.bot.conn, year, week, season_type_value)

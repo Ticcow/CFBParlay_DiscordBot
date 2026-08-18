@@ -14,12 +14,15 @@ logger = logging.getLogger("degen_bot.scheduler")
 EASTERN = ZoneInfo("America/New_York")
 
 
-async def sync_week_games(bot) -> None:
+async def sync_week_games(bot) -> int | None:
+    """Auto-detects and syncs whatever CFBD week is current right now. Returns
+    the synced week's id, or None if the calendar has no current/upcoming week
+    (off-season)."""
     now = timeutils.utc_now()
     calendar = await bot.cfbd.get_calendar(season.season_year_for(now))
     target = season.determine_current_week(calendar, now)
     if target is None:
-        return  # off-season - nothing to sync
+        return None
 
     already_synced = repository.get_week_by_number(
         bot.conn, target.season, target.week, target.season_type
@@ -33,6 +36,7 @@ async def sync_week_games(bot) -> None:
             f"📅 Week {target.week} ({target.season_type}) is open - {len(games)} games "
             "synced. Use /optin to join!"
         )
+    return week_id
 
 
 async def fetch_odds(bot) -> None:

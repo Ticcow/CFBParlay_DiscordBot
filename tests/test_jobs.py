@@ -71,19 +71,22 @@ async def test_sync_week_games_creates_week_and_announces_once(conn):
     bot.cfbd.calendar = [make_calendar_week()]
     bot.cfbd.games = [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "scheduled", None, None)]
 
-    await jobs.sync_week_games(bot)
+    week_id = await jobs.sync_week_games(bot)
 
+    assert week_id is not None
     assert len(bot.announcements) == 1
     assert "Week 1" in bot.announcements[0]
     assert repository.get_latest_week(conn)["week_number"] == 1
 
-    await jobs.sync_week_games(bot)  # re-syncing the same week shouldn't re-announce
+    week_id_again = await jobs.sync_week_games(bot)  # re-syncing shouldn't re-announce
+    assert week_id_again == week_id
     assert len(bot.announcements) == 1
 
 
-async def test_sync_week_games_noop_when_calendar_has_no_match(conn):
+async def test_sync_week_games_returns_none_when_calendar_has_no_match(conn):
     bot = FakeBot(conn)  # empty calendar - off-season
-    await jobs.sync_week_games(bot)
+    result = await jobs.sync_week_games(bot)
+    assert result is None
     assert bot.announcements == []
     assert repository.get_latest_week(conn) is None
 
