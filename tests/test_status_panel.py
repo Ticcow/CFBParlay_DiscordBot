@@ -19,6 +19,19 @@ def test_build_embed_with_no_week(conn):
     assert embed.description == "No week is open yet."
 
 
+def test_build_embed_always_shows_how_to_play(conn):
+    embed_no_week = status_panel._build_embed(FakeBot(conn), None)
+    how_to_play_no_week = next(f for f in embed_no_week.fields if f.name == "How to Play")
+    assert "Opt In" in how_to_play_no_week.value
+    assert "Start Parlay" in how_to_play_no_week.value
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    week = repository.get_week(conn, week_id)
+    embed_with_week = status_panel._build_embed(FakeBot(conn), week)
+    how_to_play_with_week = next(f for f in embed_with_week.fields if f.name == "How to Play")
+    assert how_to_play_with_week.value == how_to_play_no_week.value
+
+
 def test_build_embed_with_no_participants(conn):
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     week = repository.get_week(conn, week_id)

@@ -12,6 +12,12 @@ logger = logging.getLogger("degen_bot.panel")
 PANEL_EMBED_TITLE = "🎰 Degen Bot — Week Status"
 MAX_BET_FIELDS = 20
 
+HOW_TO_PLAY = (
+    "🎲 **Opt In** — join the week with a $1,000 bankroll\n"
+    "🏈 **Start Parlay** — pick 3-6 games and lock in a wager\n"
+    "🏆 Highest balance when the week's games finish wins"
+)
+
 # How far back to look for a leftover panel (e.g. posted before a bot restart,
 # which wipes the in-memory _panels tracking but leaves the message sitting in
 # the channel). Recent history only - not a full-channel scan.
@@ -64,6 +70,8 @@ class PanelActionsView(discord.ui.View):
 
 def _build_embed(bot, week) -> discord.Embed:
     embed = discord.Embed(title=PANEL_EMBED_TITLE, color=discord.Color.gold())
+    embed.add_field(name="How to Play", value=HOW_TO_PLAY, inline=False)
+
     if week is None:
         embed.description = "No week is open yet."
         return embed
@@ -116,7 +124,7 @@ def _build_embed(bot, week) -> discord.Embed:
                 name="...", value=f"+{len(submitted) - MAX_BET_FIELDS} more parlay(s) not shown", inline=False
             )
 
-    embed.set_footer(text="Buttons below to join in, or /optin, /parlay start, /leaderboard for season stats")
+    embed.set_footer(text="More: /balance, /parlays, /leaderboard, /mystats, /history")
     return embed
 
 
