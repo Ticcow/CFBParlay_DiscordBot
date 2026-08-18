@@ -58,3 +58,22 @@ def test_format_leg_total_under():
         make_leg(market="total", selection="under", line_value=54.5, price_american=-105)
     )
     assert "Under 54.5 (-105)" in text
+
+
+def make_game():
+    return {"home_team": "Texas", "away_team": "Ohio State"}
+
+
+def test_format_selection_button_label_spread():
+    label = formatting.format_selection_button_label(make_game(), "spread", "home", -6.5, -110)
+    assert label == "Texas -6.5 (-110)"
+
+
+def test_format_selection_button_label_moneyline():
+    label = formatting.format_selection_button_label(make_game(), "moneyline", "away", None, 200)
+    assert label == "Ohio State (+200)"
+
+
+def test_format_selection_button_label_total():
+    label = formatting.format_selection_button_label(make_game(), "total", "under", 54.5, -105)
+    assert label == "Under 54.5 (-105)"

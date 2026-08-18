@@ -20,3 +20,17 @@ def format_leg(leg) -> str:
         f"{leg['leg_number']}. {side} {leg['line_value']:g} "
         f"({format_price(leg['price_american'])}) — {matchup}"
     )
+
+
+def format_selection_button_label(
+    game, market: str, selection: str, line_value: float | None, price: int | None
+) -> str:
+    price_str = format_price(price)
+    if market == "moneyline":
+        team = game["home_team"] if selection == "home" else game["away_team"]
+        return f"{team} ({price_str})"
+    if market == "total":
+        side = "Over" if selection == "over" else "Under"
+        return f"{side} {line_value:g} ({price_str})"
+    team = game["home_team"] if selection == "home" else game["away_team"]
+    return f"{team} {line_value:+g} ({price_str})"

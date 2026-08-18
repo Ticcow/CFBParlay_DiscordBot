@@ -361,3 +361,59 @@ def test_get_week_and_list_all_weeks(conn):
     assert repository.get_week(conn, week1)["week_number"] == 1
     weeks = repository.list_all_weeks(conn)
     assert [w["id"] for w in weeks] == [week2, week1]
+
+
+# --- game picker (available games for a leg) ---
+
+
+def test_list_available_games_for_leg_excludes_started_and_already_used(conn):
+    import datetime
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    now = datetime.datetime(2026, 8, 28, tzinfo=datetime.timezone.utc)
+    past = (now - datetime.timedelta(hours=1)).isoformat()
+    future1 = (now + datetime.timedelta(hours=1)).isoformat()
+    future2 = (now + datetime.timedelta(hours=2)).isoformat()
+    repository.upsert_games(
+        conn,
+        week_id,
+        [
+            CfbdGame(1, "Texas", "Ohio State", past, "scheduled", None, None),
+            CfbdGame(2, "Alabama", "Georgia", future1, "scheduled", None, None),
+            CfbdGame(3, "Michigan", "Notre Dame", future2, "scheduled", None, None),
+        ],
+    )
+    parlay_id = repository.start_parlay(conn, user_id=1, week_id=week_id)
+    used_game, _ = repository.find_game_by_teams(conn, week_id, "Alabama", "Georgia")
+    event = OddsEvent("Alabama", "Georgia", future1, "draftkings", moneyline_home=-150, moneyline_away=130)
+    repository.insert_odds_snapshot(conn, used_game["id"], event, flipped=False)
+    snapshot = repository.get_latest_odds_snapshot(conn, used_game["id"])
+    repository.add_leg(conn, parlay_id, used_game["id"], snapshot["id"], "moneyline", "home", None, -150)
+
+    games, total = repository.list_available_games_for_leg(conn, week_id, parlay_id, now)
+
+    # Texas game already started, Alabama game is already a leg on this parlay -
+    # only Michigan/Notre Dame is left
+    assert total == 1
+    assert [g["home_team"] for g in games] == ["Michigan"]
+
+
+def test_list_available_games_for_leg_paginates(conn):
+    import datetime
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    now = datetime.datetime(2026, 8, 28, tzinfo=datetime.timezone.utc)
+    games_to_insert = [
+        CfbdGame(i, f"Home{i}", f"Away{i}", (now + datetime.timedelta(hours=i)).isoformat(), "scheduled", None, None)
+        for i in range(1, 31)  # 30 upcoming games
+    ]
+    repository.upsert_games(conn, week_id, games_to_insert)
+    parlay_id = repository.start_parlay(conn, user_id=1, week_id=week_id)
+
+    page0, total = repository.list_available_games_for_leg(conn, week_id, parlay_id, now, page=0, page_size=25)
+    page1, total_again = repository.list_available_games_for_leg(conn, week_id, parlay_id, now, page=1, page_size=25)
+
+    assert total == 30
+    assert total_again == 30
+    assert len(page0) == 25
+    assert len(page1) == 5

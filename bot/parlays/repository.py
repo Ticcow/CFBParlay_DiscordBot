@@ -191,6 +191,24 @@ def search_games(
     ).fetchall()
 
 
+def list_available_games_for_leg(
+    conn: sqlite3.Connection, week_id: int, parlay_id: int, now, page: int = 0, page_size: int = 25
+) -> tuple[list[sqlite3.Row], int]:
+    """Games in this week that haven't started and aren't already a leg on this
+    parlay, one page at a time. Returns (page_of_games, total_available_count)."""
+    used_game_ids = {leg["game_id"] for leg in list_legs(conn, parlay_id)}
+    all_games = conn.execute(
+        "SELECT * FROM games WHERE week_id = ? ORDER BY start_time_utc", (week_id,)
+    ).fetchall()
+    upcoming = [
+        game
+        for game in all_games
+        if timeutils.parse_utc(game["start_time_utc"]) > now and game["id"] not in used_game_ids
+    ]
+    start = page * page_size
+    return upcoming[start : start + page_size], len(upcoming)
+
+
 # --- weekly bankroll ---
 
 
