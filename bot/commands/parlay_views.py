@@ -106,7 +106,7 @@ def _team_label(team: str, rank: int | None) -> str:
 
 
 def _matchup_label(home_rank: int | None, away_rank: int | None, game) -> str:
-    return f"{_team_label(game['home_team'], home_rank)} vs {_team_label(game['away_team'], away_rank)}"
+    return f"{_team_label(game['away_team'], away_rank)} vs {_team_label(game['home_team'], home_rank)}"
 
 
 def _format_ranked_list(ranked_games: list[tuple[int, int | None, int | None, object]]) -> str:
@@ -196,7 +196,7 @@ class GamePickerView(discord.ui.View):
 
         options = [
             discord.SelectOption(
-                label=f"{g['home_team']} vs {g['away_team']}"[:100],
+                label=f"{g['away_team']} vs {g['home_team']}"[:100],
                 value=str(g["id"]),
                 description=_kickoff_label(g["start_time_utc"]),
             )
@@ -246,7 +246,7 @@ class GamePickerView(discord.ui.View):
 
 def _market_screen(bot, parlay_id: int, week_id: int, game) -> tuple[discord.Embed, "MarketPickerView"]:
     embed = discord.Embed(
-        title=f"{game['home_team']} vs {game['away_team']}", description="Pick a bet type."
+        title=f"{game['away_team']} vs {game['home_team']}", description="Pick a bet type."
     )
     logo_url = repository.get_team_logo(bot.conn, game["home_team"])
     if logo_url:
@@ -307,7 +307,7 @@ def _selection_screen(
     bot, parlay_id: int, week_id: int, game, snapshot, market: str
 ) -> tuple[discord.Embed, "SelectionPickerView"]:
     embed = discord.Embed(
-        title=f"{game['home_team']} vs {game['away_team']}",
+        title=f"{game['away_team']} vs {game['home_team']}",
         description=f"Pick your {market} selection.",
     )
     logo_url = repository.get_team_logo(bot.conn, game["home_team"])
