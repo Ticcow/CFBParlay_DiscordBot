@@ -48,6 +48,11 @@ No credit card required anywhere in the stack.
 - **Pregame reminders** - @mentions opted-in players who still have unspent
   bankroll at 24 and 1 hour before the week's first kickoff, so nobody
   misses the chance to spend it.
+- **Live elimination alerts and a nightly digest** - the moment a leg loses,
+  that parlay is dead (one loss kills the whole thing), so the bot posts an
+  instant @mention with a zinger instead of waiting for the rest of its legs
+  to finish. Every evening once games are underway, a bulk update lists
+  every parlay still alive, its owner, and its potential payout.
 
 ## Quickstart
 
