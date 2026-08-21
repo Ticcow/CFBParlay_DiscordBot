@@ -147,6 +147,59 @@ async def handle_clear_flair(interaction: discord.Interaction) -> None:
     await interaction.followup.send("Team flair cleared.", ephemeral=True)
 
 
+class FlairPickSelect(discord.ui.Select):
+    """Shown when a button-driven search matches more than one team - a plain
+    button can't take free text, and a select tops out at 25 options, so this
+    only appears after FlairSearchModal has already narrowed things down."""
+
+    def __init__(self, matches: list[str]):
+        options = [discord.SelectOption(label=school) for school in matches[:AUTOCOMPLETE_LIMIT]]
+        super().__init__(placeholder="Pick your team", options=options, min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        await handle_set_flair(interaction, self.values[0])
+
+
+class FlairPickView(discord.ui.View):
+    def __init__(self, matches: list[str]):
+        super().__init__(timeout=120)
+        self.add_item(FlairPickSelect(matches))
+
+
+class FlairSearchModal(discord.ui.Modal, title="Set Team Flair"):
+    """Opened by the panel's Set Flair button - a button click can't carry the
+    autocomplete /flair set gets from Discord, so this collects a search term
+    instead and either sets the flair directly (single match) or hands off to
+    FlairPickView to disambiguate (multiple matches)."""
+
+    query = discord.ui.TextInput(
+        label="Team name (or part of it)", placeholder="e.g. Purdue, Ohio State, Indiana", max_length=100
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        bot = interaction.client
+        search_term = str(self.query.value).strip()
+        matches = repository.search_team_schools(bot.conn, search_term, limit=AUTOCOMPLETE_LIMIT)
+
+        if not matches:
+            await interaction.response.send_message(
+                f"No teams matched '{search_term}' - try a shorter search term, or check "
+                "/admin sync-teams has been run.",
+                ephemeral=True,
+            )
+            return
+
+        if len(matches) == 1:
+            await handle_set_flair(interaction, matches[0])
+            return
+
+        await interaction.response.send_message(
+            f"{len(matches)} teams matched '{search_term}' - pick one:",
+            view=FlairPickView(matches),
+            ephemeral=True,
+        )
+
+
 class FlairCog(commands.GroupCog, name="flair"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
