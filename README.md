@@ -41,6 +41,10 @@ No credit card required anywhere in the stack.
   No manual intervention needed once it's running.
 - **Patch notes on deploy** - posts what changed to your configured channel
   automatically whenever you push an update and restart it.
+- **Team flair** - `/flair set` gives you a colored role (with the team's
+  logo as the role icon, if your server is Boosted to Level 2+) for any
+  FBS team, picked via autocomplete search. `/flair clear` removes it.
+  Requires the bot to have `Manage Roles`.
 
 ## Quickstart
 

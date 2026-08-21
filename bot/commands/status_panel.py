@@ -15,7 +15,8 @@ MAX_BET_FIELDS = 20
 HOW_TO_PLAY = (
     "🎲 **Opt In** — join the week with a $1,000 bankroll\n"
     "🏈 **Start Parlay** — pick 3-6 games and lock in a wager\n"
-    "🏆 Highest balance when the week's games finish wins"
+    "🏆 Highest balance when the week's games finish wins\n"
+    "🎽 **/flair set** — get a colored, iconed role for your team"
 )
 
 # How far back to look for a leftover panel (e.g. posted before a bot restart,

@@ -58,6 +58,7 @@ class RankedTeam:
 class TeamInfo:
     school: str
     logo_url: str | None
+    color: str | None = None
 
 
 def _parse_teams_top25(raw_weeks: list[dict]) -> list[RankedTeam]:
@@ -72,7 +73,7 @@ def _parse_teams_top25(raw_weeks: list[dict]) -> list[RankedTeam]:
 
 def _parse_team(raw: dict) -> TeamInfo:
     logos = raw.get("logos") or []
-    return TeamInfo(school=raw["school"], logo_url=logos[0] if logos else None)
+    return TeamInfo(school=raw["school"], logo_url=logos[0] if logos else None, color=raw.get("color"))
 
 
 class CfbdClient:

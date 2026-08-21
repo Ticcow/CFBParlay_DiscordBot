@@ -20,6 +20,7 @@ EXTENSIONS = (
     "bot.commands.bankroll",
     "bot.commands.parlay",
     "bot.commands.leaderboard",
+    "bot.commands.flair",
 )
 
 

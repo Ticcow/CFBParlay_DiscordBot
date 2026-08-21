@@ -259,12 +259,53 @@ def upsert_team_logos(conn: sqlite3.Connection, teams: list[TeamInfo]) -> None:
     for team in teams:
         conn.execute(
             """
-            INSERT INTO team_logos (school, logo_url) VALUES (?, ?)
-            ON CONFLICT (school) DO UPDATE SET logo_url = excluded.logo_url
+            INSERT INTO team_logos (school, logo_url, color) VALUES (?, ?, ?)
+            ON CONFLICT (school) DO UPDATE SET logo_url = excluded.logo_url, color = excluded.color
             """,
-            (team.school, team.logo_url),
+            (team.school, team.logo_url, team.color),
         )
     conn.commit()
+
+
+def team_exists(conn: sqlite3.Connection, school: str) -> bool:
+    row = conn.execute("SELECT 1 FROM team_logos WHERE school = ?", (school,)).fetchone()
+    return row is not None
+
+
+def get_team(conn: sqlite3.Connection, school: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT school, logo_url, color FROM team_logos WHERE school = ?", (school,)
+    ).fetchone()
+
+
+def search_team_schools(conn: sqlite3.Connection, query: str, limit: int = 25) -> list[str]:
+    rows = conn.execute(
+        "SELECT school FROM team_logos WHERE school LIKE ? ORDER BY school LIMIT ?",
+        (f"%{query}%", limit),
+    ).fetchall()
+    return [row["school"] for row in rows]
+
+
+def get_flair_role_id(conn: sqlite3.Connection, school: str) -> int | None:
+    row = conn.execute(
+        "SELECT role_id FROM team_flair_roles WHERE school = ?", (school,)
+    ).fetchone()
+    return row["role_id"] if row else None
+
+
+def set_flair_role_id(conn: sqlite3.Connection, school: str, role_id: int) -> None:
+    conn.execute(
+        """
+        INSERT INTO team_flair_roles (school, role_id) VALUES (?, ?)
+        ON CONFLICT (school) DO UPDATE SET role_id = excluded.role_id
+        """,
+        (school, role_id),
+    )
+    conn.commit()
+
+
+def list_flair_role_ids(conn: sqlite3.Connection) -> list[int]:
+    return [row["role_id"] for row in conn.execute("SELECT role_id FROM team_flair_roles")]
 
 
 # --- weekly bankroll ---

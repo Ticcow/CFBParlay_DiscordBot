@@ -509,6 +509,56 @@ def test_upsert_team_logos_updates_existing_url(conn):
     assert repository.get_team_logo(conn, "Notre Dame") == "https://example.com/new.png"
 
 
+def test_upsert_team_logos_stores_color(conn):
+    repository.upsert_team_logos(
+        conn, [TeamInfo("Ohio State", "https://example.com/osu.png", "#BB0000")]
+    )
+
+    team = repository.get_team(conn, "Ohio State")
+    assert team["color"] == "#BB0000"
+
+
+def test_team_exists(conn):
+    assert repository.team_exists(conn, "Purdue") is False
+
+    repository.upsert_team_logos(conn, [TeamInfo("Purdue", None)])
+
+    assert repository.team_exists(conn, "Purdue") is True
+
+
+def test_search_team_schools_matches_substring_case_insensitively(conn):
+    repository.upsert_team_logos(
+        conn, [TeamInfo("Ohio State", None), TeamInfo("Boise State", None), TeamInfo("Purdue", None)]
+    )
+
+    assert repository.search_team_schools(conn, "state") == ["Boise State", "Ohio State"]
+    assert repository.search_team_schools(conn, "purdue") == ["Purdue"]
+
+
+def test_search_team_schools_respects_limit(conn):
+    repository.upsert_team_logos(
+        conn, [TeamInfo("Alabama", None), TeamInfo("Auburn", None), TeamInfo("Arizona", None)]
+    )
+
+    assert len(repository.search_team_schools(conn, "a", limit=2)) == 2
+
+
+def test_flair_role_round_trip(conn):
+    assert repository.get_flair_role_id(conn, "Indiana") is None
+    assert repository.list_flair_role_ids(conn) == []
+
+    repository.upsert_team_logos(conn, [TeamInfo("Indiana", None)])
+    repository.set_flair_role_id(conn, "Indiana", 111)
+
+    assert repository.get_flair_role_id(conn, "Indiana") == 111
+    assert repository.list_flair_role_ids(conn) == [111]
+
+    repository.set_flair_role_id(conn, "Indiana", 222)
+
+    assert repository.get_flair_role_id(conn, "Indiana") == 222
+    assert repository.list_flair_role_ids(conn) == [222]
+
+
 # --- admin test-fixture helpers ---
 
 

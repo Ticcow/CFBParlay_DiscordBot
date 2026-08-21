@@ -31,7 +31,7 @@ pip install -r requirements.txt
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**. Name it "Degen Bot" (or whatever you like).
 2. In the **Bot** tab, click **Add Bot**. No privileged intents are needed - this bot is entirely slash-command driven, so leave **Message Content Intent**, **Presence Intent**, and **Server Members Intent** all off.
 3. Still in the **Bot** tab, click **Reset Token** / **Copy** to get your bot token. Keep this secret - it goes in `.env` as `DISCORD_BOT_TOKEN`.
-4. In **OAuth2 > URL Generator**, check the `bot` and `applications.commands` scopes, then under **Bot Permissions** check: `Send Messages`, `Embed Links`, `Read Message History`. `Embed Links` is required separately from `Send Messages` - without it, the panel and board embeds fail to post. If you're setting up the [auto-clean channel feature](../README.md#status-panel) also check `Manage Messages`.
+4. In **OAuth2 > URL Generator**, check the `bot` and `applications.commands` scopes, then under **Bot Permissions** check: `Send Messages`, `Embed Links`, `Read Message History`. `Embed Links` is required separately from `Send Messages` - without it, the panel and board embeds fail to post. If you're setting up the [auto-clean channel feature](../README.md#status-panel) also check `Manage Messages`. For `/flair` (team roles), also check `Manage Roles` - and after inviting the bot, drag its role above where you want team roles to sit in **Server Settings > Roles**, since a bot can only manage roles below its own highest role.
 5. Copy the generated URL, open it in a browser, and invite the bot to your server.
 
 ## 4. Get free API keys
