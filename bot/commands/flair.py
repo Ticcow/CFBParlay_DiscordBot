@@ -67,7 +67,7 @@ async def _get_or_create_flair_role(bot, guild: discord.Guild, school: str) -> d
         role = await guild.create_role(
             name=school,
             color=color,
-            icon=icon_bytes,
+            display_icon=icon_bytes if icon_bytes is not None else discord.utils.MISSING,
             hoist=True,
             mentionable=False,
             reason="Team flair role",
