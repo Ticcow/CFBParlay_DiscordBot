@@ -227,3 +227,99 @@ async def test_guarded_job_posts_failure_alert_instead_of_raising(conn):
 
     assert len(bot.announcements) == 1
     assert "failing_job" in bot.announcements[0]
+
+
+def _setup_week_kicking_off_in(conn, hours_from_now):
+    from datetime import timedelta
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    kickoff = (FIXED_NOW + timedelta(hours=hours_from_now)).isoformat().replace("+00:00", "Z")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", kickoff, "scheduled", None, None)]
+    )
+    return week_id
+
+
+async def test_pregame_reminder_noop_with_no_week(conn):
+    bot = FakeBot(conn)
+    await jobs.pregame_reminder_job(bot)
+    assert bot.announcements == []
+
+
+async def test_pregame_reminder_noop_before_any_threshold(conn):
+    bot = FakeBot(conn)
+    week_id = _setup_week_kicking_off_in(conn, hours_from_now=48)
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+
+    await jobs.pregame_reminder_job(bot)
+
+    assert bot.announcements == []
+    assert repository.has_sent_reminder(conn, week_id, 24) is False
+
+
+async def test_pregame_reminder_mentions_only_users_with_balance(conn):
+    bot = FakeBot(conn)
+    week_id = _setup_week_kicking_off_in(conn, hours_from_now=20)
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+    repository.opt_in(conn, user_id=2, week_id=week_id)
+    conn.execute(
+        "UPDATE week_participants SET current_balance = 0 WHERE user_id = 2 AND week_id = ?",
+        (week_id,),
+    )
+    conn.commit()
+
+    await jobs.pregame_reminder_job(bot)
+
+    assert len(bot.announcements) == 1
+    assert "<@1>" in bot.announcements[0]
+    assert "<@2>" not in bot.announcements[0]
+    assert "24" in bot.announcements[0]
+    assert repository.has_sent_reminder(conn, week_id, 24) is True
+
+
+async def test_pregame_reminder_does_not_repeat_the_same_threshold(conn):
+    bot = FakeBot(conn)
+    week_id = _setup_week_kicking_off_in(conn, hours_from_now=20)
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+
+    await jobs.pregame_reminder_job(bot)
+    await jobs.pregame_reminder_job(bot)
+
+    assert len(bot.announcements) == 1
+
+
+async def test_pregame_reminder_skips_the_message_when_nobody_has_balance(conn):
+    bot = FakeBot(conn)
+    week_id = _setup_week_kicking_off_in(conn, hours_from_now=20)
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+    conn.execute("UPDATE week_participants SET current_balance = 0")
+    conn.commit()
+
+    await jobs.pregame_reminder_job(bot)
+
+    assert bot.announcements == []
+    assert repository.has_sent_reminder(conn, week_id, 24) is True  # still marked, no re-checking later
+
+
+async def test_pregame_reminder_fires_multiple_crossed_thresholds_at_once(conn):
+    # simulates the job having been down/off until kickoff was already under an hour away
+    bot = FakeBot(conn)
+    week_id = _setup_week_kicking_off_in(conn, hours_from_now=0.5)
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+
+    await jobs.pregame_reminder_job(bot)
+
+    assert len(bot.announcements) == 3
+    assert repository.has_sent_reminder(conn, week_id, 24) is True
+    assert repository.has_sent_reminder(conn, week_id, 6) is True
+    assert repository.has_sent_reminder(conn, week_id, 1) is True
+
+
+async def test_pregame_reminder_noop_once_kickoff_has_passed(conn):
+    bot = FakeBot(conn)
+    week_id = _setup_week_kicking_off_in(conn, hours_from_now=-1)
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+
+    await jobs.pregame_reminder_job(bot)
+
+    assert bot.announcements == []

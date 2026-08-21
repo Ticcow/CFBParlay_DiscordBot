@@ -45,6 +45,9 @@ No credit card required anywhere in the stack.
   logo as the role icon, if your server is Boosted to Level 2+) for any
   FBS team, picked via autocomplete search. `/flair clear` removes it.
   Requires the bot to have `Manage Roles`.
+- **Pregame reminders** - @mentions opted-in players who still have unspent
+  bankroll at 24, 6, and 1 hour before the week's first kickoff, so nobody
+  misses the chance to spend it.
 
 ## Quickstart
 

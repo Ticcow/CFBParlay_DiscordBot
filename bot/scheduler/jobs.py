@@ -108,6 +108,46 @@ async def poll_scores(bot) -> None:
         await grade_week_job(bot)
 
 
+PREGAME_REMINDER_THRESHOLDS_HOURS = (24, 6, 1)
+
+
+async def pregame_reminder_job(bot) -> None:
+    """Nags opted-in players who still have unspent bankroll as the week's
+    first kickoff approaches, at each threshold in PREGAME_REMINDER_THRESHOLDS_HOURS.
+    Each threshold fires at most once per week (tracked in week_reminders_sent),
+    regardless of how many times this job runs."""
+    week = repository.get_latest_week(bot.conn)
+    if week is None:
+        return
+    earliest = repository.get_earliest_kickoff(bot.conn, week["id"])
+    if earliest is None:
+        return
+
+    now = timeutils.utc_now()
+    kickoff = timeutils.parse_utc(earliest)
+    if kickoff <= now:
+        return  # the week has already started - nothing left to remind anyone about
+
+    hours_until = (kickoff - now).total_seconds() / 3600
+
+    for threshold in PREGAME_REMINDER_THRESHOLDS_HOURS:
+        if hours_until > threshold:
+            continue
+        if repository.has_sent_reminder(bot.conn, week["id"], threshold):
+            continue
+        repository.mark_reminder_sent(bot.conn, week["id"], threshold)
+
+        user_ids = repository.list_user_ids_with_balance(bot.conn, week["id"])
+        if not user_ids:
+            continue
+        mentions = " ".join(f"<@{user_id}>" for user_id in user_ids)
+        hour_word = "hour" if threshold == 1 else "hours"
+        await bot.announce(
+            f"⏰ Week {week['week_number']} kicks off in about {threshold} {hour_word} - "
+            f"get your bets in! {mentions}"
+        )
+
+
 async def channel_cleanup_job(bot) -> int:
     return await status_panel.cleanup_channel(bot)
 
@@ -142,6 +182,7 @@ def register_jobs(bot) -> AsyncIOScheduler:
     scheduler.add_job(_guarded(bot, "fetch_odds", fetch_odds), CronTrigger(day_of_week="tue", hour=9))
     scheduler.add_job(_guarded(bot, "fetch_odds", fetch_odds), CronTrigger(day_of_week="fri", hour=16))
     scheduler.add_job(_guarded(bot, "lock_check", lock_check_job), IntervalTrigger(minutes=5))
+    scheduler.add_job(_guarded(bot, "pregame_reminder", pregame_reminder_job), IntervalTrigger(minutes=5))
     scheduler.add_job(_guarded(bot, "channel_cleanup", channel_cleanup_job), IntervalTrigger(minutes=5))
     scheduler.add_job(_guarded(bot, "poll_scores", poll_scores), CronTrigger(day_of_week="sat", minute="*/45"))
     scheduler.add_job(_guarded(bot, "poll_scores_daily", poll_scores), CronTrigger(hour=8))

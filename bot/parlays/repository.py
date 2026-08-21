@@ -604,6 +604,41 @@ def list_week_standings(conn: sqlite3.Connection, week_id: int) -> list[sqlite3.
     ).fetchall()
 
 
+def list_user_ids_with_balance(conn: sqlite3.Connection, week_id: int) -> list[int]:
+    """Opted-in users for this week who still have unspent bankroll - the
+    audience for a "games are about to start" reminder, since a $0 balance
+    means there's nothing left for them to bet with regardless."""
+    rows = conn.execute(
+        "SELECT user_id FROM week_participants WHERE week_id = ? AND current_balance > 0",
+        (week_id,),
+    ).fetchall()
+    return [row["user_id"] for row in rows]
+
+
+def get_earliest_kickoff(conn: sqlite3.Connection, week_id: int) -> str | None:
+    row = conn.execute(
+        "SELECT MIN(start_time_utc) AS earliest FROM games WHERE week_id = ?", (week_id,)
+    ).fetchone()
+    return row["earliest"] if row else None
+
+
+def has_sent_reminder(conn: sqlite3.Connection, week_id: int, threshold_hours: int) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM week_reminders_sent WHERE week_id = ? AND threshold_hours = ?",
+        (week_id, threshold_hours),
+    ).fetchone()
+    return row is not None
+
+
+def mark_reminder_sent(conn: sqlite3.Connection, week_id: int, threshold_hours: int) -> None:
+    conn.execute(
+        "INSERT INTO week_reminders_sent (week_id, threshold_hours) VALUES (?, ?) "
+        "ON CONFLICT (week_id, threshold_hours) DO NOTHING",
+        (week_id, threshold_hours),
+    )
+    conn.commit()
+
+
 def season_wins_leaderboard(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT user_id, COUNT(*) AS wins FROM week_participants WHERE is_weekly_winner = 1 "

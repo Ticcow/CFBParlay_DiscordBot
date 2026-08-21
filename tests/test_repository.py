@@ -703,3 +703,51 @@ def test_clear_unused_balance_leaves_a_lost_wager_at_zero_not_negative(conn):
     repository.clear_unused_balance(conn, week_id)
 
     assert repository.get_participant(conn, 1, week_id)["current_balance"] == 0
+
+
+# --- pregame reminders ---
+
+
+def test_list_user_ids_with_balance_excludes_zero_balance(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+    repository.opt_in(conn, user_id=2, week_id=week_id)
+    conn.execute(
+        "UPDATE week_participants SET current_balance = 0 WHERE user_id = 2 AND week_id = ?",
+        (week_id,),
+    )
+    conn.commit()
+
+    assert repository.list_user_ids_with_balance(conn, week_id) == [1]
+
+
+def test_get_earliest_kickoff_returns_min_start_time(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn,
+        week_id,
+        [
+            CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "scheduled", None, None),
+            CfbdGame(2, "Georgia", "Alabama", "2026-08-27T16:00:00Z", "scheduled", None, None),
+        ],
+    )
+
+    assert repository.get_earliest_kickoff(conn, week_id) == "2026-08-27T16:00:00Z"
+
+
+def test_get_earliest_kickoff_returns_none_with_no_games(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    assert repository.get_earliest_kickoff(conn, week_id) is None
+
+
+def test_reminder_sent_tracking_is_per_week_and_threshold(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+
+    assert repository.has_sent_reminder(conn, week_id, 24) is False
+
+    repository.mark_reminder_sent(conn, week_id, 24)
+
+    assert repository.has_sent_reminder(conn, week_id, 24) is True
+    assert repository.has_sent_reminder(conn, week_id, 6) is False
+
+    repository.mark_reminder_sent(conn, week_id, 24)  # marking twice doesn't error
