@@ -437,8 +437,10 @@ def test_list_ranked_games_for_leg_orders_by_rank_and_skips_byes(conn):
 
     ranked = repository.list_ranked_games_for_leg(conn, week_id, parlay_id, now)
 
-    assert [rank for rank, _ in ranked] == [1, 3]
-    assert [game["home_team"] for _, game in ranked] == ["Georgia", "Michigan"]
+    assert [sort_rank for sort_rank, _, _, _ in ranked] == [1, 3]
+    assert [game["home_team"] for _, _, _, game in ranked] == ["Georgia", "Michigan"]
+    # Marshall and Duke aren't ranked, so only the home side carries a rank here
+    assert [(home_rank, away_rank) for _, home_rank, away_rank, _ in ranked] == [(1, None), (3, None)]
 
 
 def test_list_ranked_games_for_leg_dedupes_ranked_vs_ranked_matchup(conn):
@@ -454,7 +456,10 @@ def test_list_ranked_games_for_leg_dedupes_ranked_vs_ranked_matchup(conn):
     ranked = repository.list_ranked_games_for_leg(conn, week_id, parlay_id, now)
 
     assert len(ranked) == 1
-    assert ranked[0][0] == 1  # appears once, under the higher (lower-number) rank
+    sort_rank, home_rank, away_rank, game = ranked[0]
+    assert sort_rank == 1  # appears once, under the higher (lower-number) rank
+    assert (home_rank, away_rank) == (1, 2)  # Georgia (home) and Alabama (away) both carry their own rank
+    assert (game["home_team"], game["away_team"]) == ("Georgia", "Alabama")
 
 
 def test_list_ranked_games_for_leg_excludes_started_and_already_used(conn):

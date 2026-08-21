@@ -48,10 +48,10 @@ class BoardCog(commands.Cog):
         for game in games:
             score = ""
             if game["status"] == "final":
-                score = f" — final {game['away_score']}-{game['home_score']}"
+                score = f" — final {game['home_score']}-{game['away_score']}"
             snapshot = repository.get_latest_odds_snapshot(self.bot.conn, game["id"])
             embed.add_field(
-                name=f"{game['away_team']} @ {game['home_team']}",
+                name=f"{game['home_team']} vs {game['away_team']}",
                 value=f"{game['start_time_utc']}{score}\n{_format_odds_line(snapshot)}",
                 inline=False,
             )

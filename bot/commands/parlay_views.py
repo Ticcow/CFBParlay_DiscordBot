@@ -101,12 +101,20 @@ class ParlayPanelView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=None)
 
 
-def _format_ranked_list(ranked_games: list[tuple[int, object]]) -> str:
+def _team_label(team: str, rank: int | None) -> str:
+    return f"#{rank} {team}" if rank is not None else team
+
+
+def _matchup_label(home_rank: int | None, away_rank: int | None, game) -> str:
+    return f"{_team_label(game['home_team'], home_rank)} vs {_team_label(game['away_team'], away_rank)}"
+
+
+def _format_ranked_list(ranked_games: list[tuple[int, int | None, int | None, object]]) -> str:
     if not ranked_games:
         return "No ranked teams have an available game this week."
     return "\n".join(
-        f"**#{rank}** {game['away_team']} @ {game['home_team']} — {_kickoff_label(game['start_time_utc'])}"
-        for rank, game in ranked_games
+        f"**{_matchup_label(home_rank, away_rank, game)}** — {_kickoff_label(game['start_time_utc'])}"
+        for _sort_rank, home_rank, away_rank, game in ranked_games
     )
 
 
@@ -118,7 +126,9 @@ def _ranked_screen(bot, parlay_id: int, week_id: int) -> tuple[discord.Embed, "R
 
 
 class RankedGamePickerView(discord.ui.View):
-    def __init__(self, bot, parlay_id: int, week_id: int, ranked_games: list[tuple[int, object]]):
+    def __init__(
+        self, bot, parlay_id: int, week_id: int, ranked_games: list[tuple[int, int | None, int | None, object]]
+    ):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.bot = bot
         self.parlay_id = parlay_id
@@ -130,11 +140,11 @@ class RankedGamePickerView(discord.ui.View):
         self.clear_items()
         options = [
             discord.SelectOption(
-                label=f"#{rank} {game['away_team']} @ {game['home_team']}"[:100],
+                label=_matchup_label(home_rank, away_rank, game)[:100],
                 value=str(game["id"]),
                 description=_kickoff_label(game["start_time_utc"]),
             )
-            for rank, game in self.ranked_games[:PAGE_SIZE]
+            for _sort_rank, home_rank, away_rank, game in self.ranked_games[:PAGE_SIZE]
         ]
         select = discord.ui.Select(
             placeholder="Choose a ranked game..." if options else "No ranked games available",
@@ -186,7 +196,7 @@ class GamePickerView(discord.ui.View):
 
         options = [
             discord.SelectOption(
-                label=f"{g['away_team']} @ {g['home_team']}"[:100],
+                label=f"{g['home_team']} vs {g['away_team']}"[:100],
                 value=str(g["id"]),
                 description=_kickoff_label(g["start_time_utc"]),
             )
@@ -236,7 +246,7 @@ class GamePickerView(discord.ui.View):
 
 def _market_screen(bot, parlay_id: int, week_id: int, game) -> tuple[discord.Embed, "MarketPickerView"]:
     embed = discord.Embed(
-        title=f"{game['away_team']} @ {game['home_team']}", description="Pick a bet type."
+        title=f"{game['home_team']} vs {game['away_team']}", description="Pick a bet type."
     )
     logo_url = repository.get_team_logo(bot.conn, game["home_team"])
     if logo_url:
@@ -297,7 +307,7 @@ def _selection_screen(
     bot, parlay_id: int, week_id: int, game, snapshot, market: str
 ) -> tuple[discord.Embed, "SelectionPickerView"]:
     embed = discord.Embed(
-        title=f"{game['away_team']} @ {game['home_team']}",
+        title=f"{game['home_team']} vs {game['away_team']}",
         description=f"Pick your {market} selection.",
     )
     logo_url = repository.get_team_logo(bot.conn, game["home_team"])

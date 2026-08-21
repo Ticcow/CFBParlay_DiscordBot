@@ -32,7 +32,7 @@ def test_format_leg_spread_home():
     text = formatting.format_leg(make_leg())
     assert "Texas -6.5" in text
     assert "(-110)" in text
-    assert "Ohio State @ Texas" in text
+    assert "Texas vs Ohio State" in text
 
 
 def test_format_leg_shows_pending_marker_by_default():

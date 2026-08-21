@@ -211,16 +211,21 @@ def list_available_games_for_leg(
 
 def list_ranked_games_for_leg(
     conn: sqlite3.Connection, week_id: int, parlay_id: int, now
-) -> list[tuple[int, sqlite3.Row]]:
-    """AP Top 25 teams' games this week, ordered by rank, as (rank, game_row)
-    pairs. A team on a bye contributes nothing (no matching game); two ranked
-    teams playing each other appears once, under the higher-ranked (lower
-    number) team's slot. Excludes started games and games already on this
-    parlay, same as list_available_games_for_leg."""
+) -> list[tuple[int, int | None, int | None, sqlite3.Row]]:
+    """AP Top 25 teams' games this week, ordered by rank, as
+    (sort_rank, home_rank, away_rank, game_row) tuples - home_rank/away_rank
+    are each side's own AP rank (None if that side is unranked), so a rank
+    number can be attached to whichever team actually holds it rather than
+    always shown as one combined prefix. A team on a bye contributes nothing
+    (no matching game); two ranked teams playing each other appears once,
+    sorted under the higher-ranked (lower number) team. Excludes started
+    games and games already on this parlay, same as
+    list_available_games_for_leg."""
     used_game_ids = {leg["game_id"] for leg in list_legs(conn, parlay_id)}
     rankings = conn.execute(
         "SELECT rank, school FROM rankings WHERE week_id = ? ORDER BY rank", (week_id,)
     ).fetchall()
+    rank_by_school = {row["school"]: row["rank"] for row in rankings}
 
     seen_game_ids = set()
     results = []
@@ -236,7 +241,9 @@ def list_ranked_games_for_leg(
         if timeutils.parse_utc(game["start_time_utc"]) <= now:
             continue
         seen_game_ids.add(game["id"])
-        results.append((row["rank"], game))
+        home_rank = rank_by_school.get(game["home_team"])
+        away_rank = rank_by_school.get(game["away_team"])
+        results.append((row["rank"], home_rank, away_rank, game))
     return results
 
 

@@ -11,7 +11,7 @@ def format_price(price: int | None) -> str:
 
 def format_leg(leg) -> str:
     marker = LEG_RESULT_MARKERS.get(leg["result"], "⏳")
-    matchup = f"{leg['away_team']} @ {leg['home_team']}"
+    matchup = f"{leg['home_team']} vs {leg['away_team']}"
     if leg["market"] == "spread":
         team = leg["home_team"] if leg["selection"] == "home" else leg["away_team"]
         return (
