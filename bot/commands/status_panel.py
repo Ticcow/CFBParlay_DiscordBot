@@ -76,9 +76,9 @@ class PanelActionsView(discord.ui.View):
         label="🎽 Set Flair", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:set_flair", row=0
     )
     async def set_flair_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        from bot.commands.flair import FlairSearchModal
+        from bot.commands import flair
 
-        await interaction.response.send_modal(FlairSearchModal())
+        await flair.handle_open_flair_picker(interaction)
 
     @discord.ui.button(
         label="🔄 Sync Week", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:sync_week", row=1

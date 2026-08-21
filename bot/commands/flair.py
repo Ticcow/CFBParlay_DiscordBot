@@ -92,9 +92,25 @@ async def handle_set_flair(interaction: discord.Interaction, school: str) -> Non
     bot = interaction.client
     await interaction.response.defer(ephemeral=True, thinking=True)
 
+    # Everything below runs after the interaction has already been deferred, so any
+    # exception that escapes uncaught leaves the user staring at "thinking..."
+    # forever - discord.py's default View/Modal error handler only logs, it doesn't
+    # reply. Catch broadly and always resolve the interaction one way or another.
+    try:
+        await _do_set_flair(interaction, school)
+    except Exception:
+        logger.exception("Failed to set flair for %s -> %s", interaction.user, school)
+        await interaction.followup.send(
+            "Something went wrong setting that flair - try again in a bit.", ephemeral=True
+        )
+
+
+async def _do_set_flair(interaction: discord.Interaction, school: str) -> None:
+    bot = interaction.client
+
     if not repository.team_exists(bot.conn, school):
         await interaction.followup.send(
-            f"Don't recognize '{school}' - pick a team from the autocomplete list "
+            f"Don't recognize '{school}' - pick a team from the list "
             "(run /admin sync-teams first if the list looks empty).",
             ephemeral=True,
         )
@@ -151,57 +167,82 @@ async def handle_clear_flair(interaction: discord.Interaction) -> None:
     await interaction.followup.send("Team flair cleared.", ephemeral=True)
 
 
-class FlairPickSelect(discord.ui.Select):
-    """Shown when a button-driven search matches more than one team - a plain
-    button can't take free text, and a select tops out at 25 options, so this
-    only appears after FlairSearchModal has already narrowed things down."""
+class FlairErrorView(discord.ui.View):
+    """discord.py's default View error handler only logs an exception - it never
+    replies, which leaves the user staring at "thinking..." forever if something
+    throws inside a callback after a defer. Every view below inherits this so a
+    failure always surfaces as a message instead of a silent hang."""
 
-    def __init__(self, matches: list[str]):
-        options = [discord.SelectOption(label=school) for school in matches[:AUTOCOMPLETE_LIMIT]]
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
+        logger.exception("Error in flair view item %r", item, exc_info=error)
+        message = "Something went wrong - try again in a bit."
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+
+
+class FlairTeamSelect(discord.ui.Select):
+    """The second step: teams in the conference picked from FlairConferenceSelect.
+    A conference tops out well under Discord's 25-option select cap, and Discord's
+    client shows an inline search box on any select with several options, so this
+    already gets the "scroll or type to filter" experience without any extra work."""
+
+    def __init__(self, schools: list[str]):
+        options = [discord.SelectOption(label=school) for school in schools[:AUTOCOMPLETE_LIMIT]]
         super().__init__(placeholder="Pick your team", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction):
         await handle_set_flair(interaction, self.values[0])
 
 
-class FlairPickView(discord.ui.View):
-    def __init__(self, matches: list[str]):
+class FlairTeamView(FlairErrorView):
+    def __init__(self, schools: list[str]):
         super().__init__(timeout=120)
-        self.add_item(FlairPickSelect(matches))
+        self.add_item(FlairTeamSelect(schools))
 
 
-class FlairSearchModal(discord.ui.Modal, title="Set Team Flair"):
-    """Opened by the panel's Set Flair button - a button click can't carry the
-    autocomplete /flair set gets from Discord, so this collects a search term
-    instead and either sets the flair directly (single match) or hands off to
-    FlairPickView to disambiguate (multiple matches)."""
+class FlairConferenceSelect(discord.ui.Select):
+    def __init__(self, conferences: list[str]):
+        options = [discord.SelectOption(label=conference) for conference in conferences[:AUTOCOMPLETE_LIMIT]]
+        super().__init__(placeholder="Pick your conference", options=options, min_values=1, max_values=1)
 
-    query = discord.ui.TextInput(
-        label="Team name (or part of it)", placeholder="e.g. Purdue, Ohio State, Indiana", max_length=100
-    )
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
+    async def callback(self, interaction: discord.Interaction) -> None:
         bot = interaction.client
-        search_term = str(self.query.value).strip()
-        matches = repository.search_team_schools(bot.conn, search_term, limit=AUTOCOMPLETE_LIMIT)
-
-        if not matches:
+        conference = self.values[0]
+        schools = repository.list_teams_in_conference(bot.conn, conference)
+        if not schools:
             await interaction.response.send_message(
-                f"No teams matched '{search_term}' - try a shorter search term, or check "
-                "/admin sync-teams has been run.",
+                f"No teams found for '{conference}' - run /admin sync-teams and try again.",
                 ephemeral=True,
             )
             return
-
-        if len(matches) == 1:
-            await handle_set_flair(interaction, matches[0])
-            return
-
-        await interaction.response.send_message(
-            f"{len(matches)} teams matched '{search_term}' - pick one:",
-            view=FlairPickView(matches),
-            ephemeral=True,
+        await interaction.response.edit_message(
+            content=f"**{conference}** - pick your team:", view=FlairTeamView(schools)
         )
+
+
+class FlairConferenceView(FlairErrorView):
+    """Opened by the panel's Set Flair button - a button click can't carry the
+    autocomplete /flair set gets from Discord, so this browses by conference
+    instead: pick a conference, then pick (or type-to-filter) a team from it."""
+
+    def __init__(self, conferences: list[str]):
+        super().__init__(timeout=120)
+        self.add_item(FlairConferenceSelect(conferences))
+
+
+async def handle_open_flair_picker(interaction: discord.Interaction) -> None:
+    bot = interaction.client
+    conferences = repository.list_conferences(bot.conn)
+    if not conferences:
+        await interaction.response.send_message(
+            "No teams cached yet - run /admin sync-teams first.", ephemeral=True
+        )
+        return
+    await interaction.response.send_message(
+        "Pick your conference:", view=FlairConferenceView(conferences), ephemeral=True
+    )
 
 
 class FlairCog(commands.GroupCog, name="flair"):

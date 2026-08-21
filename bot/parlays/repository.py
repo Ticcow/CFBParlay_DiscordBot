@@ -259,10 +259,11 @@ def upsert_team_logos(conn: sqlite3.Connection, teams: list[TeamInfo]) -> None:
     for team in teams:
         conn.execute(
             """
-            INSERT INTO team_logos (school, logo_url, color) VALUES (?, ?, ?)
-            ON CONFLICT (school) DO UPDATE SET logo_url = excluded.logo_url, color = excluded.color
+            INSERT INTO team_logos (school, logo_url, color, conference) VALUES (?, ?, ?, ?)
+            ON CONFLICT (school) DO UPDATE SET
+                logo_url = excluded.logo_url, color = excluded.color, conference = excluded.conference
             """,
-            (team.school, team.logo_url, team.color),
+            (team.school, team.logo_url, team.color, team.conference),
         )
     conn.commit()
 
@@ -274,7 +275,7 @@ def team_exists(conn: sqlite3.Connection, school: str) -> bool:
 
 def get_team(conn: sqlite3.Connection, school: str) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT school, logo_url, color FROM team_logos WHERE school = ?", (school,)
+        "SELECT school, logo_url, color, conference FROM team_logos WHERE school = ?", (school,)
     ).fetchone()
 
 
@@ -282,6 +283,20 @@ def search_team_schools(conn: sqlite3.Connection, query: str, limit: int = 25) -
     rows = conn.execute(
         "SELECT school FROM team_logos WHERE school LIKE ? ORDER BY school LIMIT ?",
         (f"%{query}%", limit),
+    ).fetchall()
+    return [row["school"] for row in rows]
+
+
+def list_conferences(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        "SELECT DISTINCT conference FROM team_logos WHERE conference IS NOT NULL ORDER BY conference"
+    ).fetchall()
+    return [row["conference"] for row in rows]
+
+
+def list_teams_in_conference(conn: sqlite3.Connection, conference: str) -> list[str]:
+    rows = conn.execute(
+        "SELECT school FROM team_logos WHERE conference = ? ORDER BY school", (conference,)
     ).fetchall()
     return [row["school"] for row in rows]
 

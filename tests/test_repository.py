@@ -543,6 +543,35 @@ def test_search_team_schools_respects_limit(conn):
     assert len(repository.search_team_schools(conn, "a", limit=2)) == 2
 
 
+def test_list_conferences_returns_distinct_sorted_non_null_values(conn):
+    repository.upsert_team_logos(
+        conn,
+        [
+            TeamInfo("Ohio State", None, conference="Big Ten"),
+            TeamInfo("Purdue", None, conference="Big Ten"),
+            TeamInfo("Alabama", None, conference="SEC"),
+            TeamInfo("Independent U", None, conference=None),
+        ],
+    )
+
+    assert repository.list_conferences(conn) == ["Big Ten", "SEC"]
+
+
+def test_list_teams_in_conference_returns_alphabetical_schools(conn):
+    repository.upsert_team_logos(
+        conn,
+        [
+            TeamInfo("Ohio State", None, conference="Big Ten"),
+            TeamInfo("Purdue", None, conference="Big Ten"),
+            TeamInfo("Alabama", None, conference="SEC"),
+        ],
+    )
+
+    assert repository.list_teams_in_conference(conn, "Big Ten") == ["Ohio State", "Purdue"]
+    assert repository.list_teams_in_conference(conn, "SEC") == ["Alabama"]
+    assert repository.list_teams_in_conference(conn, "MAC") == []
+
+
 def test_flair_role_round_trip(conn):
     assert repository.get_flair_role_id(conn, "Indiana") is None
     assert repository.list_flair_role_ids(conn) == []
