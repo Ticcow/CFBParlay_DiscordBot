@@ -52,6 +52,66 @@ def _random_final_score() -> tuple[int, int]:
     return home, away
 
 
+async def handle_sync_week(interaction: discord.Interaction) -> None:
+    """The auto-detect path only (no year/week override - a button can't take
+    args). Shared by /admin sync-week (called with no args) and the panel's
+    Sync Week button."""
+    bot = interaction.client
+    await interaction.response.defer(ephemeral=True)
+    week_id = await scheduler_jobs.sync_week_games(bot)
+    if week_id is None:
+        await interaction.followup.send(
+            "No current CFBD week found - probably off-season, or CFBD hasn't "
+            "published this year's calendar yet.",
+            ephemeral=True,
+        )
+        return
+    week_row = repository.get_week(bot.conn, week_id)
+    games = repository.list_games(bot.conn, week_id)
+    await interaction.followup.send(
+        f"Synced Week {week_row['week_number']} ({week_row['season_type']}, "
+        f"{week_row['season_year']}) - {len(games)} games.",
+        ephemeral=True,
+    )
+
+
+async def handle_sync_teams(interaction: discord.Interaction) -> None:
+    bot = interaction.client
+    await interaction.response.defer(ephemeral=True)
+    year = season.season_year_for(timeutils.utc_now())
+    teams = await bot.cfbd.get_teams(year)
+    repository.upsert_team_logos(bot.conn, teams)
+    await interaction.followup.send(f"Cached logos for {len(teams)} teams.", ephemeral=True)
+
+
+async def handle_refresh_odds(interaction: discord.Interaction) -> None:
+    bot = interaction.client
+    await interaction.response.defer(ephemeral=True)
+    week = repository.get_latest_week(bot.conn)
+    if week is None:
+        await interaction.followup.send(
+            "No week has been synced yet - run /admin sync-week first.", ephemeral=True
+        )
+        return
+
+    events = await bot.odds.get_ncaaf_odds()
+    result = repository.sync_odds_for_week(bot.conn, week["id"], events)
+
+    message = f"Matched odds for {result.matched} game(s)."
+    if result.unmatched:
+        unmatched_list = "\n".join(f"- {away} @ {home}" for home, away in result.unmatched)
+        message += (
+            f"\n\n{len(result.unmatched)} event(s) couldn't be matched to a synced game "
+            f"(team name mismatch). Use /admin add-alias to map them:\n{unmatched_list}"
+        )
+    await interaction.followup.send(message, ephemeral=True)
+
+
+async def handle_refresh_panel(interaction: discord.Interaction) -> None:
+    await status_panel.refresh(interaction.client)
+    await interaction.response.send_message("Panel refreshed.", ephemeral=True)
+
+
 class AdminCog(commands.GroupCog, name="admin"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -74,25 +134,14 @@ class AdminCog(commands.GroupCog, name="admin"):
         week: int | None = None,
         season_type: app_commands.Choice[str] | None = None,
     ):
-        await interaction.response.defer(ephemeral=True)
-
         if year is None and week is None:
-            week_id = await scheduler_jobs.sync_week_games(self.bot)
-            if week_id is None:
-                await interaction.followup.send(
-                    "No current CFBD week found - probably off-season, or CFBD hasn't "
-                    "published this year's calendar yet. Use year/week to force a specific one.",
-                    ephemeral=True,
-                )
-                return
-            week_row = repository.get_week(self.bot.conn, week_id)
-            games = repository.list_games(self.bot.conn, week_id)
-            await interaction.followup.send(
-                f"Synced Week {week_row['week_number']} ({week_row['season_type']}, "
-                f"{week_row['season_year']}) - {len(games)} games.",
-                ephemeral=True,
-            )
+            # the common case: no args at all, just auto-sync whatever CFBD
+            # says is the current/coming week - this is the same path the
+            # panel's Sync Week button uses, since a button can't take args
+            await handle_sync_week(interaction)
             return
+
+        await interaction.response.defer(ephemeral=True)
 
         if year is None or week is None:
             await interaction.followup.send(
@@ -117,27 +166,7 @@ class AdminCog(commands.GroupCog, name="admin"):
         name="refresh-odds", description="Pull the current week's odds from The Odds API"
     )
     async def refresh_odds(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        week = repository.get_latest_week(self.bot.conn)
-        if week is None:
-            await interaction.followup.send(
-                "No week has been synced yet - run /admin sync-week first.", ephemeral=True
-            )
-            return
-
-        events = await self.bot.odds.get_ncaaf_odds()
-        result = repository.sync_odds_for_week(self.bot.conn, week["id"], events)
-
-        message = f"Matched odds for {result.matched} game(s)."
-        if result.unmatched:
-            unmatched_list = "\n".join(
-                f"- {away} @ {home}" for home, away in result.unmatched
-            )
-            message += (
-                f"\n\n{len(result.unmatched)} event(s) couldn't be matched to a synced game "
-                f"(team name mismatch). Use /admin add-alias to map them:\n{unmatched_list}"
-            )
-        await interaction.followup.send(message, ephemeral=True)
+        await handle_refresh_odds(interaction)
 
     @app_commands.command(
         name="add-alias",
@@ -213,11 +242,7 @@ class AdminCog(commands.GroupCog, name="admin"):
         description="Cache team logos from CollegeFootballData (run once per season, not weekly)",
     )
     async def sync_teams(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        year = season.season_year_for(timeutils.utc_now())
-        teams = await self.bot.cfbd.get_teams(year)
-        repository.upsert_team_logos(self.bot.conn, teams)
-        await interaction.followup.send(f"Cached logos for {len(teams)} teams.", ephemeral=True)
+        await handle_sync_teams(interaction)
 
     @app_commands.command(
         name="test-seed",
@@ -321,8 +346,7 @@ class AdminCog(commands.GroupCog, name="admin"):
         name="refresh-panel", description="Manually repost the week status panel"
     )
     async def refresh_panel_cmd(self, interaction: discord.Interaction):
-        await status_panel.refresh(self.bot)
-        await interaction.response.send_message("Panel refreshed.", ephemeral=True)
+        await handle_refresh_panel(interaction)
 
     @app_commands.command(
         name="cleanup-channel",
