@@ -57,7 +57,7 @@ async def handle_sync_week(interaction: discord.Interaction) -> None:
     args). Shared by /admin sync-week (called with no args) and the panel's
     Sync Week button."""
     bot = interaction.client
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
     week_id = await scheduler_jobs.sync_week_games(bot)
     if week_id is None:
         await interaction.followup.send(
@@ -77,7 +77,7 @@ async def handle_sync_week(interaction: discord.Interaction) -> None:
 
 async def handle_sync_teams(interaction: discord.Interaction) -> None:
     bot = interaction.client
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
     year = season.season_year_for(timeutils.utc_now())
     teams = await bot.cfbd.get_teams(year)
     repository.upsert_team_logos(bot.conn, teams)
@@ -86,7 +86,7 @@ async def handle_sync_teams(interaction: discord.Interaction) -> None:
 
 async def handle_refresh_odds(interaction: discord.Interaction) -> None:
     bot = interaction.client
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
     week = repository.get_latest_week(bot.conn)
     if week is None:
         await interaction.followup.send(
@@ -141,7 +141,7 @@ class AdminCog(commands.GroupCog, name="admin"):
             await handle_sync_week(interaction)
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         if year is None or week is None:
             await interaction.followup.send(
@@ -191,7 +191,7 @@ class AdminCog(commands.GroupCog, name="admin"):
         description="Lock submitted parlays past kickoff and expire stale drafts",
     )
     async def lock_check_cmd(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         result = await scheduler_jobs.lock_check_job(self.bot)
         await interaction.followup.send(
             f"Locked {len(result['locked'])} parlay(s), "
@@ -204,7 +204,7 @@ class AdminCog(commands.GroupCog, name="admin"):
         description="Grade completed games, credit balances, and settle the weekly winner",
     )
     async def grade_week_cmd(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         week = repository.get_latest_week(self.bot.conn)
         if week is None:
             await interaction.followup.send("No week is open yet.", ephemeral=True)
@@ -249,7 +249,7 @@ class AdminCog(commands.GroupCog, name="admin"):
         description="[TEST] Create a synthetic test week - no waiting on real games/odds",
     )
     async def test_seed(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         existing = _get_test_week(self.bot)
         if existing:
             repository.delete_week_cascade(self.bot.conn, existing["id"])
@@ -301,7 +301,7 @@ class AdminCog(commands.GroupCog, name="admin"):
         description="[TEST] Auto-finish every unfinished test-week game with random scores, then grade the week",
     )
     async def test_finish_week(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         week = _get_test_week(self.bot)
         if week is None:
             await interaction.followup.send(
@@ -353,7 +353,7 @@ class AdminCog(commands.GroupCog, name="admin"):
         description="Manually delete anything older than 5 min in the panel channel except the panel",
     )
     async def cleanup_channel_cmd(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         removed = await status_panel.cleanup_channel(self.bot)
         await interaction.followup.send(f"Removed {removed} message(s).", ephemeral=True)
 
