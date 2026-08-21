@@ -28,6 +28,20 @@ def format_leg(leg) -> str:
     )
 
 
+def format_payout_and_status(parlay) -> tuple[str, str]:
+    """Payout text and a status label for a parlay - actual payout + WIN/LOSS/PUSH
+    once graded, potential payout + the raw status (submitted/locked) while
+    still pending. Shared by the status panel and /parlays so both agree."""
+    if parlay["status"] == "graded":
+        return f"${parlay['actual_payout_dollars']:.2f} payout", parlay["result"].upper()
+    potential = (
+        f"${parlay['potential_payout_dollars']:.2f}"
+        if parlay["potential_payout_dollars"] is not None
+        else "-"
+    )
+    return f"{potential} potential", parlay["status"]
+
+
 def format_selection_button_label(
     game, market: str, selection: str, line_value: float | None, price: int | None
 ) -> str:

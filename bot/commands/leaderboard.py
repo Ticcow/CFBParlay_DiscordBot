@@ -35,8 +35,10 @@ class LeaderboardCog(commands.Cog):
             wager = (
                 f"${parlay['wager_dollars']:.2f}" if parlay["wager_dollars"] is not None else "-"
             )
+            payout_text, status_label = formatting.format_payout_and_status(parlay)
             embed.add_field(
-                name=f"<@{parlay['user_id']}> — #{parlay['id']} [{parlay['status']}] {wager}",
+                name=f"<@{parlay['user_id']}> — #{parlay['id']} [{status_label}] "
+                f"{wager} wager → {payout_text}",
                 value=leg_text[:1024],
                 inline=False,
             )

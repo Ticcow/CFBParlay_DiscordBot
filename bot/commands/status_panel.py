@@ -146,18 +146,7 @@ def _build_embed(bot, week) -> discord.Embed:
             legs = repository.list_legs_with_games(bot.conn, parlay["id"])
             leg_text = "\n".join(formatting.format_leg(leg) for leg in legs)
             wager = f"${parlay['wager_dollars']:.2f}" if parlay["wager_dollars"] is not None else "-"
-
-            if parlay["status"] == "graded":
-                payout_text = f"${parlay['actual_payout_dollars']:.2f} payout"
-                status_label = parlay["result"].upper()
-            else:
-                potential = (
-                    f"${parlay['potential_payout_dollars']:.2f}"
-                    if parlay["potential_payout_dollars"] is not None
-                    else "-"
-                )
-                payout_text = f"{potential} potential"
-                status_label = parlay["status"]
+            payout_text, status_label = formatting.format_payout_and_status(parlay)
 
             embed.add_field(
                 name=f"<@{parlay['user_id']}> — {wager} wager → {payout_text} [{status_label}]",

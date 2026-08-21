@@ -77,6 +77,37 @@ def test_format_leg_total_under():
     assert "Under 54.5 (-105)" in text
 
 
+def make_parlay(**overrides):
+    parlay = {
+        "status": "submitted",
+        "result": None,
+        "potential_payout_dollars": 277.78,
+        "actual_payout_dollars": None,
+    }
+    parlay.update(overrides)
+    return parlay
+
+
+def test_format_payout_and_status_shows_potential_while_pending():
+    payout_text, status_label = formatting.format_payout_and_status(make_parlay(status="locked"))
+    assert payout_text == "$277.78 potential"
+    assert status_label == "locked"
+
+
+def test_format_payout_and_status_shows_actual_payout_and_result_once_graded():
+    parlay = make_parlay(status="graded", result="win", actual_payout_dollars=277.78)
+    payout_text, status_label = formatting.format_payout_and_status(parlay)
+    assert payout_text == "$277.78 payout"
+    assert status_label == "WIN"
+
+
+def test_format_payout_and_status_handles_missing_potential_payout():
+    payout_text, _ = formatting.format_payout_and_status(
+        make_parlay(status="submitted", potential_payout_dollars=None)
+    )
+    assert payout_text == "- potential"
+
+
 def make_game():
     return {"home_team": "Texas", "away_team": "Ohio State"}
 
