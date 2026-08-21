@@ -11,6 +11,8 @@ RAW_GAME = {
     "completed": False,
     "homePoints": None,
     "awayPoints": None,
+    "homeClassification": "fbs",
+    "awayClassification": "fbs",
 }
 
 
@@ -58,6 +60,37 @@ async def test_get_games_invokes_usage_logger():
     await client.get_games(2026, 1)
 
     assert calls == [("cfbd", "/games")]
+
+
+@respx.mock
+async def test_get_games_filters_out_non_fbs_matchups():
+    # CFBD's "division" query param doesn't actually filter server-side - it
+    # returns every classification regardless, so get_games has to drop
+    # anything that isn't a true FBS-vs-FBS game itself.
+    fcs_vs_d2_game = {
+        **RAW_GAME,
+        "id": 99999,
+        "homeTeam": "Morehead State",
+        "awayTeam": "Ohio Dominican",
+        "homeClassification": "fcs",
+        "awayClassification": "ii",
+    }
+    cupcake_game = {
+        **RAW_GAME,
+        "id": 88888,
+        "homeTeam": "Alabama",
+        "awayTeam": "Some FCS School",
+        "homeClassification": "fbs",
+        "awayClassification": "fcs",
+    }
+    respx.get("https://api.collegefootballdata.com/games").mock(
+        return_value=Response(200, json=[RAW_GAME, fcs_vs_d2_game, cupcake_game])
+    )
+
+    client = CfbdClient(api_key="test-key")
+    games = await client.get_games(2026, 1)
+
+    assert [g.cfbd_game_id for g in games] == [12345]
 
 
 RAW_RANKINGS_WEEK = {
