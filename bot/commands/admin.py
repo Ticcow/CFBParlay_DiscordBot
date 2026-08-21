@@ -52,7 +52,6 @@ def _random_final_score() -> tuple[int, int]:
     return home, away
 
 
-@app_commands.default_permissions(manage_guild=True)
 class AdminCog(commands.GroupCog, name="admin"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
