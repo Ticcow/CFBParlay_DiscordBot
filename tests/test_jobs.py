@@ -309,9 +309,8 @@ async def test_pregame_reminder_fires_multiple_crossed_thresholds_at_once(conn):
 
     await jobs.pregame_reminder_job(bot)
 
-    assert len(bot.announcements) == 3
+    assert len(bot.announcements) == 2
     assert repository.has_sent_reminder(conn, week_id, 24) is True
-    assert repository.has_sent_reminder(conn, week_id, 6) is True
     assert repository.has_sent_reminder(conn, week_id, 1) is True
 
 

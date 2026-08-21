@@ -46,7 +46,7 @@ No credit card required anywhere in the stack.
   FBS team, picked via autocomplete search. `/flair clear` removes it.
   Requires the bot to have `Manage Roles`.
 - **Pregame reminders** - @mentions opted-in players who still have unspent
-  bankroll at 24, 6, and 1 hour before the week's first kickoff, so nobody
+  bankroll at 24 and 1 hour before the week's first kickoff, so nobody
   misses the chance to spend it.
 
 ## Quickstart

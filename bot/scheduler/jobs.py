@@ -108,7 +108,7 @@ async def poll_scores(bot) -> None:
         await grade_week_job(bot)
 
 
-PREGAME_REMINDER_THRESHOLDS_HOURS = (24, 6, 1)
+PREGAME_REMINDER_THRESHOLDS_HOURS = (24, 1)
 
 
 async def pregame_reminder_job(bot) -> None:
