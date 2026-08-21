@@ -4,6 +4,8 @@ from discord.ext import commands
 
 from bot.parlays import formatting, repository
 
+MAX_PARLAY_FIELDS = 20
+
 
 class LeaderboardCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -26,18 +28,26 @@ class LeaderboardCog(commands.Cog):
             await interaction.response.send_message("No submitted parlays yet.", ephemeral=True)
             return
 
-        lines = ["This week's submitted parlays:"]
-        for parlay in parlays:
+        embed = discord.Embed(title=f"Week {week['week_number']} Parlays")
+        for parlay in parlays[:MAX_PARLAY_FIELDS]:
             legs = repository.list_legs_with_games(self.bot.conn, parlay["id"])
-            leg_text = "; ".join(formatting.format_leg(leg) for leg in legs)
+            leg_text = "\n".join(formatting.format_leg(leg) for leg in legs)
             wager = (
                 f"${parlay['wager_dollars']:.2f}" if parlay["wager_dollars"] is not None else "-"
             )
-            lines.append(
-                f"<@{parlay['user_id']}> — #{parlay['id']} [{parlay['status']}] {wager}: {leg_text}"
+            embed.add_field(
+                name=f"<@{parlay['user_id']}> — #{parlay['id']} [{parlay['status']}] {wager}",
+                value=leg_text[:1024],
+                inline=False,
+            )
+        if len(parlays) > MAX_PARLAY_FIELDS:
+            embed.add_field(
+                name="...",
+                value=f"+{len(parlays) - MAX_PARLAY_FIELDS} more parlay(s) not shown",
+                inline=False,
             )
 
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="leaderboard", description="View the weekly or season leaderboard")
     @app_commands.describe(scope="Which leaderboard to show")
