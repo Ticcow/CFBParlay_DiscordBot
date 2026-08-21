@@ -4,7 +4,7 @@ import pytest
 
 from bot.integrations.cfbd_client import CalendarWeek, CfbdGame, RankedTeam
 from bot.integrations.odds_client import OddsEvent
-from bot.parlays import repository, timeutils
+from bot.parlays import grading, repository, timeutils
 from bot.scheduler import jobs
 
 FIXED_NOW = datetime(2026, 8, 28, tzinfo=timezone.utc)
@@ -197,6 +197,113 @@ async def test_poll_scores_grades_a_finished_leg_without_finishing_the_whole_wee
     assert results_by_game[bama_game["id"]] == "pending"
     # the parlay itself isn't graded yet - Alabama hasn't finished
     assert repository.get_parlay(conn, parlay_id)["status"] == "submitted"
+
+
+def _setup_submitted_parlay_with_one_leg(conn, week_id, user_id, home, away, selection="home"):
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, home, away, "2026-08-29T19:00:00Z", "scheduled", None, None)]
+    )
+    game, _ = repository.find_game_by_teams(conn, week_id, home, away)
+    event = OddsEvent(home, away, "2026-08-29T19:00:00Z", "draftkings", moneyline_home=-150, moneyline_away=130)
+    repository.insert_odds_snapshot(conn, game["id"], event, flipped=False)
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
+    participant = repository.opt_in(conn, user_id=user_id, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, user_id, week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "moneyline", selection, None, -150)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 166.67)
+    return parlay_id, game
+
+
+async def test_poll_scores_announces_elimination_on_a_fresh_loss(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    parlay_id, _ = _setup_submitted_parlay_with_one_leg(
+        conn, week_id, user_id=42, home="Texas", away="Ohio State", selection="home"
+    )
+    # Texas (home) loses outright
+    bot.cfbd.games = [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 10, 24)]
+
+    await jobs.poll_scores(bot)
+
+    # this is the week's only game, so poll_scores also finalizes the week
+    # right after - the elimination alert should still be the first message
+    assert "eliminated" in bot.announcements[0]
+    assert "<@42>" in bot.announcements[0]
+
+
+async def test_poll_scores_does_not_announce_elimination_on_a_win(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(
+        conn, week_id, user_id=42, home="Texas", away="Ohio State", selection="home"
+    )
+    bot.cfbd.games = [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 24, 17)]
+
+    await jobs.poll_scores(bot)
+
+    assert not any("eliminated" in message for message in bot.announcements)
+
+
+async def test_evening_digest_noop_with_no_week(conn):
+    bot = FakeBot(conn)
+    await jobs.evening_digest_job(bot)
+    assert bot.announcements == []
+
+
+async def test_evening_digest_noop_before_any_game_has_started(conn):
+    from datetime import timedelta
+
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    future = (FIXED_NOW + timedelta(hours=3)).isoformat().replace("+00:00", "Z")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", future, "scheduled", None, None)]
+    )
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+
+    await jobs.evening_digest_job(bot)
+
+    assert bot.announcements == []
+
+
+async def test_evening_digest_noop_with_nothing_active(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    parlay_id, _ = _setup_submitted_parlay_with_one_leg(
+        conn, week_id, user_id=1, home="Texas", away="Ohio State", selection="home"
+    )
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-28T00:00:00Z", "final", 10, 24)]
+    )
+    grading.grade_pending_legs(conn, week_id)  # eliminates the only parlay
+
+    await jobs.evening_digest_job(bot)
+
+    assert bot.announcements == []
+
+
+async def test_evening_digest_lists_active_parlays_with_payout_and_progress(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-28T00:00:00Z", "final", 24, 17)]
+    )
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    event = OddsEvent("Texas", "Ohio State", "2026-08-28T00:00:00Z", "draftkings", moneyline_home=-150, moneyline_away=130)
+    repository.insert_odds_snapshot(conn, game["id"], event, flipped=False)
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
+    participant = repository.opt_in(conn, user_id=1, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 1, week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 166.67)
+    grading.grade_pending_legs(conn, week_id)  # this leg wins, parlay stays active
+
+    await jobs.evening_digest_job(bot)
+
+    assert len(bot.announcements) == 1
+    assert "<@1>" in bot.announcements[0]
+    assert "$166.67" in bot.announcements[0]
+    assert "1/1 legs decided" in bot.announcements[0]
 
 
 async def test_api_usage_report_job_noop_with_no_usage(conn):

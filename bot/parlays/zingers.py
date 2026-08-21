@@ -85,3 +85,22 @@ def get_flair_reaction(team: str | None, username: str, choice_fn=random.choice)
         categories.append(team_options)
     line = choice_fn(choice_fn(categories))
     return line.format(user=username)
+
+
+_ELIMINATION_ZINGERS = [
+    "{user} has been eliminated. Book it.",
+    "That's it for {user} this week - parlay's dead.",
+    "{user}'s parlay just flatlined. Moment of silence.",
+    "Down goes {user}. Down goes {user}.",
+    "{user} is officially out of it. Better luck next week.",
+    "RIP {user}'s parlay - gone too soon.",
+    "{user} has left the building.",
+    "And just like that, {user} is done for the week.",
+]
+
+
+def get_elimination_zinger(mention: str, choice_fn=random.choice) -> str:
+    """A one-liner for a parlay that just got mathematically eliminated -
+    mention should be a Discord mention string like "<@123>" so it renders
+    inline as a real ping rather than plain text."""
+    return choice_fn(_ELIMINATION_ZINGERS).format(user=mention)

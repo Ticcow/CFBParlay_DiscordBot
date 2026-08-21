@@ -40,23 +40,43 @@ def grade_parlay(leg_results: list[str]) -> str:
     return "win"
 
 
-def grade_pending_legs(conn, week_id: int) -> int:
+def grade_pending_legs(conn, week_id: int) -> list[dict]:
     """Grades any individual leg whose game just went final, even while other
     legs on the same parlay are still pending - so people can watch a parlay's
     legs resolve one at a time throughout the day instead of only finding out
     anything once the whole parlay's legs (and thus the parlay itself) are
     done. Never touches the parlay's own status/bankroll - that stays
-    grade_week's job, once every leg on it is actually graded. Returns how
-    many legs were graded."""
-    graded_count = 0
+    grade_week's job, once every leg on it is actually graded.
+
+    Returns one entry per leg just graded: {"parlay_id", "user_id", "leg"
+    (with its "result" already updated), "result", "already_had_loss"} -
+    already_had_loss is False exactly once per parlay, on whichever leg
+    first turns the parlay into a guaranteed loss, so a caller can fire a
+    one-time "eliminated" notification instead of one per losing leg."""
+    newly_graded = []
     for parlay in repository.list_gradable_parlays(conn, week_id):
-        for leg in repository.list_legs_with_games(conn, parlay["id"]):
+        legs = repository.list_legs_with_games(conn, parlay["id"])
+        already_had_loss = any(leg["result"] == "loss" for leg in legs)
+        for leg in legs:
             if leg["result"] != "pending" or leg["game_status"] != "final":
                 continue
-            repository.grade_leg_result(conn, leg["id"], grade_leg(leg))
-            graded_count += 1
+            result = grade_leg(leg)
+            repository.grade_leg_result(conn, leg["id"], result)
+            graded_leg = dict(leg)
+            graded_leg["result"] = result
+            newly_graded.append(
+                {
+                    "parlay_id": parlay["id"],
+                    "user_id": parlay["user_id"],
+                    "leg": graded_leg,
+                    "result": result,
+                    "already_had_loss": already_had_loss,
+                }
+            )
+            if result == "loss":
+                already_had_loss = True  # a later leg in this same pass shouldn't also trigger
     conn.commit()
-    return graded_count
+    return newly_graded
 
 
 def grade_week(conn, week_id: int) -> dict:

@@ -7,7 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from bot.commands import status_panel
-from bot.parlays import grading, locking, repository, standings, timeutils
+from bot.parlays import formatting, grading, locking, repository, standings, timeutils, zingers
 from bot.scheduler import season
 
 logger = logging.getLogger("degen_bot.scheduler")
@@ -90,6 +90,15 @@ async def grade_week_job(bot) -> dict:
     return result
 
 
+def _elimination_message(entry: dict) -> str:
+    mention = f"<@{entry['user_id']}>"
+    return (
+        f"💀 {mention}'s parlay is eliminated!\n"
+        f"{formatting.format_leg(entry['leg'])}\n"
+        f"{zingers.get_elimination_zinger(mention)}"
+    )
+
+
 async def poll_scores(bot) -> None:
     week = repository.get_latest_week(bot.conn)
     if week is None:
@@ -100,6 +109,14 @@ async def poll_scores(bot) -> None:
     # grade individual legs as their own game finishes, not just once the whole
     # week is done - lets people watch a parlay's legs resolve throughout the day
     graded_legs = grading.grade_pending_legs(bot.conn, week["id"])
+
+    # a single losing leg dooms the whole parlay under the all-legs-must-win
+    # rule, so announce the moment that happens instead of waiting for every
+    # other leg on it to also finish - one alert per parlay, ever
+    for entry in graded_legs:
+        if entry["result"] == "loss" and not entry["already_had_loss"]:
+            await bot.announce(_elimination_message(entry))
+
     if graded_legs:
         await status_panel.refresh(bot)
 
@@ -148,6 +165,34 @@ async def pregame_reminder_job(bot) -> None:
         )
 
 
+async def evening_digest_job(bot) -> None:
+    """A once-a-day bulk roundup of every parlay still alive - who it belongs
+    to, its potential payout, and how many of its legs are already decided.
+    Silently skips if the week's games haven't started yet, or if there's
+    nothing left alive to report (no bets, or everyone's already been
+    eliminated) - no news is no message, not an empty one."""
+    week = repository.get_latest_week(bot.conn)
+    if week is None:
+        return
+    earliest = repository.get_earliest_kickoff(bot.conn, week["id"])
+    if earliest is None or timeutils.parse_utc(earliest) > timeutils.utc_now():
+        return  # nothing has kicked off yet this week
+
+    active = repository.list_active_parlays_for_week(bot.conn, week["id"])
+    if not active:
+        return
+
+    lines = [f"📋 **Parlay Update — Week {week['week_number']}**"]
+    for parlay in active:
+        legs = repository.list_legs_with_games(bot.conn, parlay["id"])
+        decided = sum(1 for leg in legs if leg["result"] != "pending")
+        lines.append(
+            f"<@{parlay['user_id']}> — ${parlay['wager_dollars']:.2f} → "
+            f"${parlay['potential_payout_dollars']:.2f} potential ({decided}/{len(legs)} legs decided)"
+        )
+    await bot.announce("\n".join(lines))
+
+
 async def channel_cleanup_job(bot) -> int:
     return await status_panel.cleanup_channel(bot)
 
@@ -187,6 +232,7 @@ def register_jobs(bot) -> AsyncIOScheduler:
     scheduler.add_job(_guarded(bot, "poll_scores", poll_scores), CronTrigger(day_of_week="sat", minute="*/45"))
     scheduler.add_job(_guarded(bot, "poll_scores_daily", poll_scores), CronTrigger(hour=8))
     scheduler.add_job(_guarded(bot, "grade_week_fallback", grade_week_job), CronTrigger(day_of_week="sun", hour=8))
+    scheduler.add_job(_guarded(bot, "evening_digest", evening_digest_job), CronTrigger(hour=19))
     scheduler.add_job(_guarded(bot, "api_usage_report", api_usage_report_job), CronTrigger(day=1, hour=9))
     scheduler.start()
     return scheduler

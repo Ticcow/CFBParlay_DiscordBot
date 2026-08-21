@@ -187,9 +187,11 @@ def test_grade_pending_legs_grades_only_the_finished_leg(conn):
     repository.add_leg(conn, parlay_id, pending_game["id"], pending_snapshot["id"], "moneyline", "home", None, -150)
     repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 277.78)
 
-    graded_count = grading.grade_pending_legs(conn, week_id)
+    graded = grading.grade_pending_legs(conn, week_id)
 
-    assert graded_count == 1
+    assert len(graded) == 1
+    assert graded[0]["result"] == "win"
+    assert graded[0]["already_had_loss"] is False
     legs = repository.list_legs_with_games(conn, parlay_id)
     results_by_game = {leg["game_id"]: leg["result"] for leg in legs}
     assert results_by_game[final_game["id"]] == "win"
@@ -214,8 +216,8 @@ def test_grade_pending_legs_does_not_regrade_already_graded_legs(conn):
     first_pass = grading.grade_pending_legs(conn, week_id)
     second_pass = grading.grade_pending_legs(conn, week_id)
 
-    assert first_pass == 1
-    assert second_pass == 0
+    assert len(first_pass) == 1
+    assert len(second_pass) == 0
 
 
 def test_grade_pending_legs_returns_zero_when_nothing_is_final(conn):
@@ -227,4 +229,38 @@ def test_grade_pending_legs_returns_zero_when_nothing_is_final(conn):
     repository.add_leg(conn, parlay_id, pending_game["id"], snapshot["id"], "moneyline", "home", None, -150)
     repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 166.67)
 
-    assert grading.grade_pending_legs(conn, week_id) == 0
+    assert grading.grade_pending_legs(conn, week_id) == []
+
+
+def test_grade_pending_legs_flags_only_the_first_loss_as_a_fresh_elimination(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    # home (-150) loses outright, so this leg grades a loss
+    lost_game = _sync_game(conn, week_id, 1, "Texas", "Ohio State", "final", 10, 24)
+    still_pending_game = _sync_game(conn, week_id, 2, "Alabama", "Georgia", "scheduled")
+
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 7, week_id)
+    lost_snapshot = repository.get_latest_odds_snapshot(conn, lost_game["id"])
+    pending_snapshot = repository.get_latest_odds_snapshot(conn, still_pending_game["id"])
+    repository.add_leg(conn, parlay_id, lost_game["id"], lost_snapshot["id"], "moneyline", "home", None, -150)
+    repository.add_leg(
+        conn, parlay_id, still_pending_game["id"], pending_snapshot["id"], "moneyline", "home", None, -150
+    )
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 277.78)
+
+    first_pass = grading.grade_pending_legs(conn, week_id)
+
+    assert len(first_pass) == 1
+    assert first_pass[0]["result"] == "loss"
+    assert first_pass[0]["already_had_loss"] is False
+    assert first_pass[0]["parlay_id"] == parlay_id
+    assert first_pass[0]["user_id"] == 7
+    assert first_pass[0]["leg"]["result"] == "loss"  # the in-memory leg reflects the new grade
+
+    # finish the second leg later - the parlay was already eliminated, so this
+    # shouldn't be reported as a fresh elimination even though it also loses
+    repository.set_game_final_score(conn, still_pending_game["id"], home_score=10, away_score=24)
+    second_pass = grading.grade_pending_legs(conn, week_id)
+
+    assert len(second_pass) == 1
+    assert second_pass[0]["already_had_loss"] is True

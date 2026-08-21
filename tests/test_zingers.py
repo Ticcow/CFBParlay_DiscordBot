@@ -59,3 +59,14 @@ def test_get_flair_reaction_can_pick_a_team_specific_roast():
 def test_get_flair_reaction_has_variety_across_categories():
     seen = {zingers.get_flair_reaction("Purdue", "Alice") for _ in range(60)}
     assert len(seen) > 5, "expected a mix of generic, emoji, and team-specific reactions"
+
+
+def test_get_elimination_zinger_embeds_the_mention_verbatim():
+    result = zingers.get_elimination_zinger("<@123>", choice_fn=lambda options: options[0])
+    assert result == zingers._ELIMINATION_ZINGERS[0].format(user="<@123>")
+    assert "<@123>" in result
+
+
+def test_get_elimination_zinger_has_multiple_distinct_lines():
+    seen = {zingers.get_elimination_zinger("<@123>") for _ in range(30)}
+    assert len(seen) > 1
