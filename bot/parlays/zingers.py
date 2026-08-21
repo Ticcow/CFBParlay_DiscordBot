@@ -50,3 +50,38 @@ def get_zinger(team: str | None, username: str, choice_fn=random.choice) -> str 
     if not options:
         return None
     return choice_fn(options).format(user=username)
+
+
+_GENERIC_FLAIR_LINES = [
+    "{user} has picked a side. Bold. Very bold.",
+    "New flair just dropped for {user} - the rivalry begins.",
+    "{user} is officially team-pilled.",
+    "Bandwagon check: {user}, is this your real team or just this week's vibe?",
+    "{user} locked in a flair. No takebacks (well, /flair clear exists, but still).",
+    "{user} is now flying the flag. Hope it doesn't end in tears.",
+]
+
+_EMOJI_LETTER_WORDS = ["WOW", "LOL", "NICE", "HYPE", "GOAT", "SWAG", "VIBES", "BASED", "MOOD", "RAD"]
+
+_REGIONAL_INDICATOR_A = 0x1F1E6
+
+
+def _spell_in_emoji(word: str) -> str:
+    """Spells a word out with regional-indicator letter emoji, e.g. WOW ->
+    'W O W'. Joined with spaces (not concatenated directly) so consecutive
+    letter pairs never accidentally read as a country flag emoji - Discord
+    and most clients render two adjacent regional indicators as a flag when
+    the pair matches a real ISO code."""
+    return " ".join(chr(_REGIONAL_INDICATOR_A + (ord(letter) - ord("A"))) for letter in word.upper())
+
+
+def get_flair_reaction(team: str | None, username: str, choice_fn=random.choice) -> str:
+    """A silly reaction to someone setting a team flair - unlike get_zinger,
+    this never returns None, since every flair pick deserves some kind of
+    response, not just the handful of teams with a dedicated roast on file."""
+    categories = [_GENERIC_FLAIR_LINES, [_spell_in_emoji(word) for word in _EMOJI_LETTER_WORDS]]
+    team_options = _ZINGERS.get(team.strip().lower()) if team else None
+    if team_options:
+        categories.append(team_options)
+    line = choice_fn(choice_fn(categories))
+    return line.format(user=username)

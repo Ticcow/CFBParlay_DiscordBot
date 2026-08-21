@@ -5,7 +5,7 @@ import httpx
 from discord import app_commands
 from discord.ext import commands
 
-from bot.parlays import repository
+from bot.parlays import repository, zingers
 
 logger = logging.getLogger("degen_bot.flair")
 
@@ -107,17 +107,23 @@ async def handle_set_flair(interaction: discord.Interaction, school: str) -> Non
 
     other_flair_role_ids = set(repository.list_flair_role_ids(bot.conn)) - {role.id}
     roles_to_remove = [r for r in member.roles if r.id in other_flair_role_ids]
+    already_had_role = role in member.roles
+    changed = bool(roles_to_remove) or not already_had_role
 
     try:
         if roles_to_remove:
             await member.remove_roles(*roles_to_remove, reason="Switching team flair")
-        if role not in member.roles:
+        if not already_had_role:
             await member.add_roles(role, reason="Set team flair")
     except discord.Forbidden:
         await interaction.followup.send(NO_ROLE_PERMS_MESSAGE, ephemeral=True)
         return
 
-    await interaction.followup.send(f"You're now flaired for the {school}.", ephemeral=True)
+    if changed:
+        await interaction.followup.send(f"You're now flaired for the {school}.", ephemeral=True)
+        await bot.announce(zingers.get_flair_reaction(school, interaction.user.name))
+    else:
+        await interaction.followup.send(f"You're already flaired for the {school}.", ephemeral=True)
 
 
 async def handle_clear_flair(interaction: discord.Interaction) -> None:

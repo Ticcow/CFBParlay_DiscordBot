@@ -30,3 +30,32 @@ def test_get_zinger_covers_every_advertised_team_with_multiple_lines():
     for team in ("Purdue", "Ohio State", "Indiana", "UCF", "Oklahoma State"):
         seen = {zingers.get_zinger(team, "Alice") for _ in range(30)}
         assert len(seen) > 1, f"expected multiple distinct zingers for {team}"
+
+
+def test_spell_in_emoji_joins_regional_indicators_with_spaces():
+    assert zingers._spell_in_emoji("LOL") == "\U0001F1F1 \U0001F1F4 \U0001F1F1"
+
+
+def test_get_flair_reaction_never_returns_none():
+    assert zingers.get_flair_reaction(None, "Alice") is not None
+    assert zingers.get_flair_reaction("Rice", "Alice") is not None
+    assert zingers.get_flair_reaction("Purdue", "Alice") is not None
+
+
+def test_get_flair_reaction_formats_username_from_generic_pool():
+    result = zingers.get_flair_reaction(
+        None, "Alice", choice_fn=lambda options: options[0]
+    )
+    assert result == "Alice has picked a side. Bold. Very bold."
+
+
+def test_get_flair_reaction_can_pick_a_team_specific_roast():
+    result = zingers.get_flair_reaction(
+        "Purdue", "Alice", choice_fn=lambda options: options[-1]
+    )
+    assert result == zingers._ZINGERS["purdue"][-1].format(user="Alice")
+
+
+def test_get_flair_reaction_has_variety_across_categories():
+    seen = {zingers.get_flair_reaction("Purdue", "Alice") for _ in range(60)}
+    assert len(seen) > 5, "expected a mix of generic, emoji, and team-specific reactions"
