@@ -5,7 +5,7 @@ import httpx
 from discord import app_commands
 from discord.ext import commands
 
-from bot.parlays import repository, zingers
+from bot.parlays import flair_icons, repository, zingers
 
 logger = logging.getLogger("degen_bot.flair")
 
@@ -57,7 +57,11 @@ async def _get_or_create_flair_role(bot, guild: discord.Guild, school: str) -> d
 
     team = repository.get_team(bot.conn, school)
     color = _parse_color(team["color"] if team else None)
-    icon_bytes = await _fetch_icon_bytes(team["logo_url"] if team else None)
+    # a small, pre-cropped Reddit flair icon reads far better as a round role
+    # icon than a full team logo does - fall back to the CFBD logo for the
+    # handful of teams (recent FBS transitions) not on that site yet
+    icon_url = flair_icons.get_flair_icon_url(school) or (team["logo_url"] if team else None)
+    icon_bytes = await _fetch_icon_bytes(icon_url)
 
     try:
         role = await guild.create_role(
