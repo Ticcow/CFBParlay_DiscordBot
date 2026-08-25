@@ -29,12 +29,14 @@ def _parse_game(raw: dict) -> CfbdGame:
     )
 
 
-def _is_fbs_matchup(raw: dict) -> bool:
+def _involves_fbs_team(raw: dict) -> bool:
     # CFBD's /games "division" query param is a no-op - it returns every game
     # across every classification (FCS, II, III...) regardless of what's passed,
     # so filtering has to happen here using the per-game classification fields
-    # the response actually includes.
-    return raw.get("homeClassification") == "fbs" and raw.get("awayClassification") == "fbs"
+    # the response actually includes. Keep the game if EITHER side is FBS, not
+    # just both - a Week 1 cupcake game (FBS vs. FCS) still has real sportsbook
+    # lines and is worth tracking, even though the opponent isn't FBS itself.
+    return raw.get("homeClassification") == "fbs" or raw.get("awayClassification") == "fbs"
 
 
 @dataclass
@@ -102,14 +104,14 @@ class CfbdClient:
             response = await client.get(
                 "/games",
                 # no "division" param here - CFBD's /games endpoint ignores it and
-                # returns every classification regardless, so the FBS-only filter
-                # happens in _is_fbs_matchup() below instead
+                # returns every classification regardless, so the FBS filter
+                # happens in _involves_fbs_team() below instead
                 params={"year": year, "week": week, "seasonType": season_type},
             )
             response.raise_for_status()
             if self._log_usage:
                 self._log_usage("cfbd", "/games")
-            return [_parse_game(raw) for raw in response.json() if _is_fbs_matchup(raw)]
+            return [_parse_game(raw) for raw in response.json() if _involves_fbs_team(raw)]
 
     async def get_calendar(self, year: int) -> list[CalendarWeek]:
         async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers) as client:

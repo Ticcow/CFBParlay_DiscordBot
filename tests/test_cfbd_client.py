@@ -63,10 +63,10 @@ async def test_get_games_invokes_usage_logger():
 
 
 @respx.mock
-async def test_get_games_filters_out_non_fbs_matchups():
+async def test_get_games_filters_out_matchups_with_no_fbs_team_at_all():
     # CFBD's "division" query param doesn't actually filter server-side - it
     # returns every classification regardless, so get_games has to drop
-    # anything that isn't a true FBS-vs-FBS game itself.
+    # anything that doesn't involve at least one FBS team itself.
     fcs_vs_d2_game = {
         **RAW_GAME,
         "id": 99999,
@@ -75,6 +75,20 @@ async def test_get_games_filters_out_non_fbs_matchups():
         "homeClassification": "fcs",
         "awayClassification": "ii",
     }
+    respx.get("https://api.collegefootballdata.com/games").mock(
+        return_value=Response(200, json=[RAW_GAME, fcs_vs_d2_game])
+    )
+
+    client = CfbdClient(api_key="test-key")
+    games = await client.get_games(2026, 1)
+
+    assert [g.cfbd_game_id for g in games] == [12345]
+
+
+@respx.mock
+async def test_get_games_keeps_a_cupcake_game_with_only_one_fbs_side():
+    # a Week 1 FBS-vs-FCS game still has real sportsbook lines, so it's worth
+    # tracking even though the opponent isn't FBS
     cupcake_game = {
         **RAW_GAME,
         "id": 88888,
@@ -84,13 +98,13 @@ async def test_get_games_filters_out_non_fbs_matchups():
         "awayClassification": "fcs",
     }
     respx.get("https://api.collegefootballdata.com/games").mock(
-        return_value=Response(200, json=[RAW_GAME, fcs_vs_d2_game, cupcake_game])
+        return_value=Response(200, json=[cupcake_game])
     )
 
     client = CfbdClient(api_key="test-key")
     games = await client.get_games(2026, 1)
 
-    assert [g.cfbd_game_id for g in games] == [12345]
+    assert [g.cfbd_game_id for g in games] == [88888]
 
 
 RAW_RANKINGS_WEEK = {
