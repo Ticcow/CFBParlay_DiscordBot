@@ -49,6 +49,20 @@ class PanelActionsView(discord.ui.View):
     with the equivalent slash command - imported lazily here to avoid a
     circular import, since those modules import this one for status_panel.refresh()."""
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
+        # discord.py's default View error handler only logs - it never replies,
+        # which leaves whoever clicked staring at "thinking..." forever if a
+        # button's handler raises after deferring. Always resolve the interaction.
+        logger.exception("Error in panel view item %r", item, exc_info=error)
+        message = "Something went wrong - try again in a bit."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass  # interaction webhook already expired/invalid - nothing more we can do
+
     def __init__(self, *, week_is_open: bool = True):
         super().__init__(timeout=None)
         self.optin_button.disabled = not week_is_open

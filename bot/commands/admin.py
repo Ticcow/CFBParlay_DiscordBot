@@ -99,12 +99,21 @@ async def handle_refresh_odds(interaction: discord.Interaction) -> None:
 
     message = f"Matched odds for {result.matched} game(s)."
     if result.unmatched:
-        unmatched_list = "\n".join(f"- {away} @ {home}" for home, away in result.unmatched)
+        # cap what's shown - a real mismatch list this long is rare, but since
+        # FBS-only filtering trimmed the games table, most "unmatched" odds
+        # events these days are just non-FBS opponents we don't track at all,
+        # and Discord hard-rejects any message over 2000 characters
+        UNMATCHED_DISPLAY_LIMIT = 15
+        shown = result.unmatched[:UNMATCHED_DISPLAY_LIMIT]
+        unmatched_list = "\n".join(f"- {away} vs {home}" for home, away in shown)
         message += (
-            f"\n\n{len(result.unmatched)} event(s) couldn't be matched to a synced game "
-            f"(team name mismatch). Use /admin add-alias to map them:\n{unmatched_list}"
+            f"\n\n{len(result.unmatched)} event(s) couldn't be matched to a synced game - "
+            "usually just a non-FBS opponent we don't track, occasionally a real team name "
+            f"mismatch fixable with /admin add-alias:\n{unmatched_list}"
         )
-    await interaction.followup.send(message, ephemeral=True)
+        if len(result.unmatched) > UNMATCHED_DISPLAY_LIMIT:
+            message += f"\n...and {len(result.unmatched) - UNMATCHED_DISPLAY_LIMIT} more."
+    await interaction.followup.send(message[:2000], ephemeral=True)
 
 
 async def handle_refresh_panel(interaction: discord.Interaction) -> None:

@@ -176,10 +176,13 @@ class FlairErrorView(discord.ui.View):
     async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
         logger.exception("Error in flair view item %r", item, exc_info=error)
         message = "Something went wrong - try again in a bit."
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
-        else:
-            await interaction.response.send_message(message, ephemeral=True)
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass  # interaction webhook already expired/invalid - nothing more we can do
 
 
 class FlairTeamSelect(discord.ui.Select):

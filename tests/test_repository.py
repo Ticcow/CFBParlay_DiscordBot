@@ -499,6 +499,18 @@ def test_replace_rankings_overwrites_previous_week_rankings(conn):
     assert [r["school"] for r in rows] == ["Ohio State"]
 
 
+def test_replace_rankings_allows_a_tied_rank(conn):
+    # AP polls can genuinely tie two schools at the same rank
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+
+    repository.replace_rankings(conn, week_id, [RankedTeam(14, "USC"), RankedTeam(14, "BYU")])
+
+    rows = conn.execute(
+        "SELECT school FROM rankings WHERE week_id = ? AND rank = 14 ORDER BY school", (week_id,)
+    ).fetchall()
+    assert [r["school"] for r in rows] == ["BYU", "USC"]
+
+
 def test_team_logo_round_trip(conn):
     assert repository.get_team_logo(conn, "Notre Dame") is None
 
