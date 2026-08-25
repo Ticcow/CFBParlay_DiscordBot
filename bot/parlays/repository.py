@@ -194,6 +194,16 @@ def sync_odds_for_week(
     conn: sqlite3.Connection, week_id: int, events: list[OddsEvent]
 ) -> OddsSyncResult:
     result = OddsSyncResult()
+
+    # the-odds-api's feed covers every upcoming week, not just this one - a
+    # future week's game can't possibly match anything in our (single-week)
+    # games table, so drop those up front instead of reporting them as noise
+    # in the unmatched list.
+    latest_kickoff = get_latest_kickoff(conn, week_id)
+    if latest_kickoff is not None:
+        cutoff = timeutils.parse_utc(latest_kickoff)
+        events = [e for e in events if timeutils.parse_utc(e.commence_time) <= cutoff]
+
     known_schools = None  # computed lazily - only needed once an exact match first fails
     for event in events:
         home = (
@@ -697,6 +707,13 @@ def get_earliest_kickoff(conn: sqlite3.Connection, week_id: int) -> str | None:
         "SELECT MIN(start_time_utc) AS earliest FROM games WHERE week_id = ?", (week_id,)
     ).fetchone()
     return row["earliest"] if row else None
+
+
+def get_latest_kickoff(conn: sqlite3.Connection, week_id: int) -> str | None:
+    row = conn.execute(
+        "SELECT MAX(start_time_utc) AS latest FROM games WHERE week_id = ?", (week_id,)
+    ).fetchone()
+    return row["latest"] if row else None
 
 
 def has_sent_reminder(conn: sqlite3.Connection, week_id: int, threshold_hours: int) -> bool:

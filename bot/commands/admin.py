@@ -52,36 +52,74 @@ def _random_final_score() -> tuple[int, int]:
     return home, away
 
 
+async def _do_sync_week(bot) -> tuple[int | None, str]:
+    """Auto-detects and syncs whatever CFBD week is current. Returns
+    (week_id, message) - week_id is None if the calendar has no current/
+    upcoming week (off-season)."""
+    week_id = await scheduler_jobs.sync_week_games(bot)
+    if week_id is None:
+        return None, (
+            "No current CFBD week found - probably off-season, or CFBD hasn't "
+            "published this year's calendar yet."
+        )
+    week_row = repository.get_week(bot.conn, week_id)
+    games = repository.list_games(bot.conn, week_id)
+    return week_id, (
+        f"Synced Week {week_row['week_number']} ({week_row['season_type']}, "
+        f"{week_row['season_year']}) - {len(games)} games."
+    )
+
+
+async def _do_sync_teams(bot) -> str:
+    year = season.season_year_for(timeutils.utc_now())
+    teams = await bot.cfbd.get_teams(year)
+    repository.upsert_team_logos(bot.conn, teams)
+    return f"Cached logos for {len(teams)} teams."
+
+
+UNMATCHED_ODDS_DISPLAY_LIMIT = 15
+
+
+def _format_odds_result(result: repository.OddsSyncResult) -> str:
+    message = f"Matched odds for {result.matched} game(s)."
+    if result.unmatched:
+        # cap what's shown - a real mismatch list this long is rare, but since
+        # FBS-only filtering trimmed the games table, most "unmatched" odds
+        # events these days are just non-FBS opponents we don't track at all,
+        # and Discord hard-rejects any message over 2000 characters
+        shown = result.unmatched[:UNMATCHED_ODDS_DISPLAY_LIMIT]
+        unmatched_list = "\n".join(f"- {away} vs {home}" for home, away in shown)
+        message += (
+            f"\n\n{len(result.unmatched)} event(s) couldn't be matched to a synced game - "
+            "usually just a non-FBS opponent we don't track, occasionally a real team name "
+            f"mismatch fixable with /admin add-alias:\n{unmatched_list}"
+        )
+        if len(result.unmatched) > UNMATCHED_ODDS_DISPLAY_LIMIT:
+            message += f"\n...and {len(result.unmatched) - UNMATCHED_ODDS_DISPLAY_LIMIT} more."
+    return message
+
+
+async def _do_refresh_odds(bot, week_id: int) -> str:
+    events = await bot.odds.get_ncaaf_odds()
+    result = repository.sync_odds_for_week(bot.conn, week_id, events)
+    return _format_odds_result(result)
+
+
 async def handle_sync_week(interaction: discord.Interaction) -> None:
     """The auto-detect path only (no year/week override - a button can't take
     args). Shared by /admin sync-week (called with no args) and the panel's
-    Sync Week button."""
+    Sync All button."""
     bot = interaction.client
     await interaction.response.defer(ephemeral=True, thinking=True)
-    week_id = await scheduler_jobs.sync_week_games(bot)
-    if week_id is None:
-        await interaction.followup.send(
-            "No current CFBD week found - probably off-season, or CFBD hasn't "
-            "published this year's calendar yet.",
-            ephemeral=True,
-        )
-        return
-    week_row = repository.get_week(bot.conn, week_id)
-    games = repository.list_games(bot.conn, week_id)
-    await interaction.followup.send(
-        f"Synced Week {week_row['week_number']} ({week_row['season_type']}, "
-        f"{week_row['season_year']}) - {len(games)} games.",
-        ephemeral=True,
-    )
+    _, message = await _do_sync_week(bot)
+    await interaction.followup.send(message, ephemeral=True)
 
 
 async def handle_sync_teams(interaction: discord.Interaction) -> None:
     bot = interaction.client
     await interaction.response.defer(ephemeral=True, thinking=True)
-    year = season.season_year_for(timeutils.utc_now())
-    teams = await bot.cfbd.get_teams(year)
-    repository.upsert_team_logos(bot.conn, teams)
-    await interaction.followup.send(f"Cached logos for {len(teams)} teams.", ephemeral=True)
+    message = await _do_sync_teams(bot)
+    await interaction.followup.send(message, ephemeral=True)
 
 
 async def handle_refresh_odds(interaction: discord.Interaction) -> None:
@@ -93,27 +131,30 @@ async def handle_refresh_odds(interaction: discord.Interaction) -> None:
             "No week has been synced yet - run /admin sync-week first.", ephemeral=True
         )
         return
-
-    events = await bot.odds.get_ncaaf_odds()
-    result = repository.sync_odds_for_week(bot.conn, week["id"], events)
-
-    message = f"Matched odds for {result.matched} game(s)."
-    if result.unmatched:
-        # cap what's shown - a real mismatch list this long is rare, but since
-        # FBS-only filtering trimmed the games table, most "unmatched" odds
-        # events these days are just non-FBS opponents we don't track at all,
-        # and Discord hard-rejects any message over 2000 characters
-        UNMATCHED_DISPLAY_LIMIT = 15
-        shown = result.unmatched[:UNMATCHED_DISPLAY_LIMIT]
-        unmatched_list = "\n".join(f"- {away} vs {home}" for home, away in shown)
-        message += (
-            f"\n\n{len(result.unmatched)} event(s) couldn't be matched to a synced game - "
-            "usually just a non-FBS opponent we don't track, occasionally a real team name "
-            f"mismatch fixable with /admin add-alias:\n{unmatched_list}"
-        )
-        if len(result.unmatched) > UNMATCHED_DISPLAY_LIMIT:
-            message += f"\n...and {len(result.unmatched) - UNMATCHED_DISPLAY_LIMIT} more."
+    message = await _do_refresh_odds(bot, week["id"])
     await interaction.followup.send(message[:2000], ephemeral=True)
+
+
+async def handle_sync_all(interaction: discord.Interaction) -> None:
+    """Runs sync-week, sync-teams, and refresh-odds back to back - one click
+    for the common "get everything current" case instead of three. Shared by
+    /admin sync-all and the panel's Sync All button."""
+    bot = interaction.client
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    week_id, week_message = await _do_sync_week(bot)
+    lines = [f"1️⃣ {week_message}"]
+
+    teams_message = await _do_sync_teams(bot)
+    lines.append(f"2️⃣ {teams_message}")
+
+    if week_id is None:
+        lines.append("3️⃣ Skipped odds refresh - no week to attach them to.")
+    else:
+        odds_message = await _do_refresh_odds(bot, week_id)
+        lines.append(f"3️⃣ {odds_message}")
+
+    await interaction.followup.send("\n\n".join(lines)[:2000], ephemeral=True)
 
 
 async def handle_refresh_panel(interaction: discord.Interaction) -> None:
@@ -176,6 +217,13 @@ class AdminCog(commands.GroupCog, name="admin"):
     )
     async def refresh_odds(self, interaction: discord.Interaction):
         await handle_refresh_odds(interaction)
+
+    @app_commands.command(
+        name="sync-all",
+        description="Run sync-week, sync-teams, and refresh-odds back to back",
+    )
+    async def sync_all(self, interaction: discord.Interaction):
+        await handle_sync_all(interaction)
 
     @app_commands.command(
         name="add-alias",

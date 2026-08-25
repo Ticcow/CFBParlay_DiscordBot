@@ -67,10 +67,9 @@ class PanelActionsView(discord.ui.View):
         super().__init__(timeout=None)
         self.optin_button.disabled = not week_is_open
         self.start_parlay_button.disabled = not week_is_open
-        # sync_week/sync_teams/refresh_panel all work with no week open (sync_week
-        # is how a week gets created in the first place) - only refresh_odds needs
-        # one to already exist, same as the /admin refresh-odds command does.
-        self.refresh_odds_button.disabled = not week_is_open
+        # sync_all and refresh_panel both work with no week open - sync_all is
+        # how a week gets created in the first place (it skips the odds step
+        # on its own if there's still nothing to attach them to)
 
     @discord.ui.button(label="🎲 Opt In", style=discord.ButtonStyle.success, custom_id="degen_bot:panel:optin", row=0)
     async def optin_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -95,28 +94,12 @@ class PanelActionsView(discord.ui.View):
         await flair.handle_open_flair_picker(interaction)
 
     @discord.ui.button(
-        label="🔄 Sync Week", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:sync_week", row=1
+        label="🔄 Sync All", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:sync_all", row=1
     )
-    async def sync_week_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
+    async def sync_all_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
         from bot.commands import admin
 
-        await admin.handle_sync_week(interaction)
-
-    @discord.ui.button(
-        label="🖼️ Sync Teams", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:sync_teams", row=1
-    )
-    async def sync_teams_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        from bot.commands import admin
-
-        await admin.handle_sync_teams(interaction)
-
-    @discord.ui.button(
-        label="💰 Refresh Odds", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:refresh_odds", row=1
-    )
-    async def refresh_odds_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        from bot.commands import admin
-
-        await admin.handle_refresh_odds(interaction)
+        await admin.handle_sync_all(interaction)
 
     @discord.ui.button(
         label="🔃 Refresh Panel", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:refresh_panel", row=1

@@ -154,6 +154,21 @@ def test_sync_odds_for_week_reports_unmatched_events(conn):
     assert result.unmatched == [("Alabama", "Georgia")]
 
 
+def test_sync_odds_for_week_ignores_events_after_this_weeks_last_kickoff(conn):
+    # the-odds-api's feed covers every upcoming week, not just this one - an
+    # event for a future week's game can't match anything here and shouldn't
+    # even be reported as unmatched noise
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(conn, week_id, [make_game()])  # Texas vs Ohio State, kicks off 2026-08-29
+
+    next_week_event = make_odds_event(home_team_raw="Georgia", away_team_raw="Alabama")
+    next_week_event.commence_time = "2026-09-06T19:00:00Z"  # a week later
+    result = repository.sync_odds_for_week(conn, week_id, [next_week_event])
+
+    assert result.matched == 0
+    assert result.unmatched == []
+
+
 def test_sync_odds_for_week_matches_school_plus_mascot_names_automatically(conn):
     # the-odds-api returns "School Mascot" (e.g. "TCU Horned Frogs") while our
     # games table stores the bare school name from CFBD - no alias needed
