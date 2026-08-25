@@ -1,4 +1,6 @@
+import re
 import sqlite3
+import unicodedata
 from dataclasses import dataclass, field
 
 from bot.integrations import team_aliases
@@ -97,6 +99,44 @@ def find_game_by_teams(
     return (row, True) if row else (None, False)
 
 
+def _normalize_team_name(name: str) -> str:
+    """Lowercased, accent-stripped, punctuation-stripped comparison form -
+    "San José State" and "Hawai'i" fold to the same shape "the-odds-api"
+    uses ("San Jose State Spartans", "Hawaii Rainbow Warriors")."""
+    decomposed = unicodedata.normalize("NFKD", name)
+    ascii_only = "".join(c for c in decomposed if not unicodedata.combining(c))
+    no_apostrophes = ascii_only.replace("'", "").replace("’", "")
+    cleaned = re.sub(r"[^a-z0-9 ]", " ", no_apostrophes.lower())
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _list_school_names_for_week(conn: sqlite3.Connection, week_id: int) -> list[str]:
+    rows = conn.execute(
+        "SELECT home_team AS school FROM games WHERE week_id = ? "
+        "UNION SELECT away_team AS school FROM games WHERE week_id = ?",
+        (week_id, week_id),
+    ).fetchall()
+    return [row["school"] for row in rows]
+
+
+def _resolve_fuzzy_school_name(odds_name: str, known_schools: list[str]) -> str | None:
+    """Matches an odds feed name like "Texas A&M Aggies" to the bare school
+    name "Texas A&M" our games table stores it under - the-odds-api returns
+    "School Mascot", CFBD (and so our games table) stores just "School".
+    Prefers the longest matching school name so "Texas A&M" wins over the
+    shorter "Texas" for a name like "Texas A&M Aggies". Returns None (leaving
+    the event unmatched, not mismatched) if nothing this week's slate has on
+    file is a prefix - most often a real non-FBS opponent we don't track."""
+    norm_odds = _normalize_team_name(odds_name)
+    best = None
+    for school in known_schools:
+        norm_school = _normalize_team_name(school)
+        if norm_odds == norm_school or norm_odds.startswith(norm_school + " "):
+            if best is None or len(norm_school) > len(_normalize_team_name(best)):
+                best = school
+    return best
+
+
 def insert_odds_snapshot(
     conn: sqlite3.Connection, game_id: int, event: OddsEvent, flipped: bool
 ) -> None:
@@ -149,6 +189,7 @@ def sync_odds_for_week(
     conn: sqlite3.Connection, week_id: int, events: list[OddsEvent]
 ) -> OddsSyncResult:
     result = OddsSyncResult()
+    known_schools = None  # computed lazily - only needed once an exact match first fails
     for event in events:
         home = (
             team_aliases.resolve(conn, team_aliases.ODDS_API_SOURCE, event.home_team_raw)
@@ -159,6 +200,19 @@ def sync_odds_for_week(
             or event.away_team_raw
         )
         game, flipped = find_game_by_teams(conn, week_id, home, away)
+
+        if game is None:
+            # the-odds-api returns "School Mascot" (e.g. "TCU Horned Frogs") while
+            # our games table stores the bare school name from CFBD - fall back to
+            # matching on that prefix before giving up, so most teams resolve
+            # automatically instead of needing a manual /admin add-alias each
+            if known_schools is None:
+                known_schools = _list_school_names_for_week(conn, week_id)
+            fuzzy_home = _resolve_fuzzy_school_name(home, known_schools)
+            fuzzy_away = _resolve_fuzzy_school_name(away, known_schools)
+            if fuzzy_home and fuzzy_away:
+                game, flipped = find_game_by_teams(conn, week_id, fuzzy_home, fuzzy_away)
+
         if game is None:
             result.unmatched.append((event.home_team_raw, event.away_team_raw))
             continue

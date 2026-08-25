@@ -154,6 +154,70 @@ def test_sync_odds_for_week_reports_unmatched_events(conn):
     assert result.unmatched == [("Alabama", "Georgia")]
 
 
+def test_sync_odds_for_week_matches_school_plus_mascot_names_automatically(conn):
+    # the-odds-api returns "School Mascot" (e.g. "TCU Horned Frogs") while our
+    # games table stores the bare school name from CFBD - no alias needed
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "TCU", "North Carolina", "2026-08-29T19:00:00Z", "scheduled", None, None)]
+    )
+
+    event = make_odds_event(home_team_raw="TCU Horned Frogs", away_team_raw="North Carolina Tar Heels")
+    result = repository.sync_odds_for_week(conn, week_id, [event])
+
+    assert result.matched == 1
+    assert result.unmatched == []
+
+
+def test_sync_odds_for_week_fuzzy_match_prefers_the_longer_school_name(conn):
+    # "Texas A&M Aggies" must resolve to "Texas A&M", not the shorter "Texas"
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn,
+        week_id,
+        [
+            CfbdGame(1, "Texas", "Rice", "2026-08-29T19:00:00Z", "scheduled", None, None),
+            CfbdGame(2, "Texas A&M", "LSU", "2026-08-29T19:00:00Z", "scheduled", None, None),
+        ],
+    )
+
+    event = make_odds_event(home_team_raw="Texas A&M Aggies", away_team_raw="LSU Tigers")
+    result = repository.sync_odds_for_week(conn, week_id, [event])
+
+    assert result.matched == 1
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas A&M", "LSU")
+    assert repository.get_latest_odds_snapshot(conn, game["id"]) is not None
+    other_game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Rice")
+    assert repository.get_latest_odds_snapshot(conn, other_game["id"]) is None
+
+
+def test_sync_odds_for_week_fuzzy_match_ignores_accents_and_apostrophes(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Stanford", "Hawai'i", "2026-08-29T19:00:00Z", "scheduled", None, None)]
+    )
+
+    event = make_odds_event(home_team_raw="Stanford Cardinal", away_team_raw="Hawaii Rainbow Warriors")
+    result = repository.sync_odds_for_week(conn, week_id, [event])
+
+    assert result.matched == 1
+
+
+def test_sync_odds_for_week_leaves_a_real_non_fbs_opponent_unmatched(conn):
+    # Buffalo's FBS game is tracked, but its FCS opponent Albany never was -
+    # fuzzy matching shouldn't invent a match for a team we don't have on file
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Buffalo", "Marshall", "2026-08-29T19:00:00Z", "scheduled", None, None)]
+    )
+
+    event = make_odds_event(home_team_raw="Buffalo Bulls", away_team_raw="Albany Great Danes")
+    result = repository.sync_odds_for_week(conn, week_id, [event])
+
+    assert result.matched == 0
+    assert result.unmatched == [("Buffalo Bulls", "Albany Great Danes")]
+
+
 def test_get_latest_odds_snapshot_returns_most_recent(conn):
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     repository.upsert_games(conn, week_id, [make_game()])
