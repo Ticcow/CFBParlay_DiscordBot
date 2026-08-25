@@ -244,6 +244,85 @@ async def test_poll_scores_does_not_announce_elimination_on_a_win(conn):
     assert not any("eliminated" in message for message in bot.announcements)
 
 
+async def test_grade_week_job_auto_syncs_next_week_once_finalized(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(
+        conn, week_id, user_id=42, home="Texas", away="Ohio State", selection="home"
+    )
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 24, 17)]
+    )
+    # FIXED_NOW (2026-08-28) is before this week's window, so it's picked as
+    # the soonest upcoming week once grading tries to advance into it
+    bot.cfbd.calendar = [
+        CalendarWeek(
+            season=2026, week=2, season_type="regular",
+            first_game_start="2026-09-01T00:00:00Z", last_game_start="2026-09-07T23:59:00Z",
+        )
+    ]
+    bot.cfbd.games = [CfbdGame(2, "Alabama", "Georgia", "2026-09-05T19:00:00Z", "scheduled", None, None)]
+
+    await jobs.grade_week_job(bot)
+
+    assert any("is final" in m for m in bot.announcements)
+    assert any("Week 2" in m and "is open" in m for m in bot.announcements)
+    assert repository.get_latest_week(conn)["week_number"] == 2
+
+
+async def test_grade_week_job_does_not_advance_when_not_yet_finalized(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn,
+        week_id,
+        [
+            CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 24, 17),
+            CfbdGame(2, "Alabama", "Georgia", "2026-08-29T19:00:00Z", "scheduled", None, None),
+        ],
+    )
+    texas_game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    bama_game, _ = repository.find_game_by_teams(conn, week_id, "Alabama", "Georgia")
+    for game in (texas_game, bama_game):
+        event = OddsEvent(
+            game["home_team"], game["away_team"], game["start_time_utc"], "draftkings",
+            moneyline_home=-150, moneyline_away=130,
+        )
+        repository.insert_odds_snapshot(conn, game["id"], event, flipped=False)
+    participant = repository.opt_in(conn, user_id=1, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 1, week_id)
+    texas_snapshot = repository.get_latest_odds_snapshot(conn, texas_game["id"])
+    bama_snapshot = repository.get_latest_odds_snapshot(conn, bama_game["id"])
+    repository.add_leg(conn, parlay_id, texas_game["id"], texas_snapshot["id"], "moneyline", "home", None, -150)
+    repository.add_leg(conn, parlay_id, bama_game["id"], bama_snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 277.78)
+    # Alabama hasn't finished yet, so grading isn't complete
+
+    bot.cfbd.calendar = [make_calendar_week()]  # would advance into this if given the chance
+
+    await jobs.grade_week_job(bot)
+
+    assert bot.announcements == []
+    assert repository.get_latest_week(conn)["week_number"] == 1  # no advance
+
+
+async def test_grade_week_job_finalizes_without_erroring_at_end_of_season(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(
+        conn, week_id, user_id=42, home="Texas", away="Ohio State", selection="home"
+    )
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 24, 17)]
+    )
+    bot.cfbd.calendar = []  # nothing left this season
+
+    await jobs.grade_week_job(bot)
+
+    assert any("is final" in m for m in bot.announcements)
+    assert repository.get_latest_week(conn)["week_number"] == 1  # nothing to advance into
+
+
 async def test_evening_digest_noop_with_no_week(conn):
     bot = FakeBot(conn)
     await jobs.evening_digest_job(bot)

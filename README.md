@@ -38,7 +38,8 @@ No credit card required anywhere in the stack.
 - **Fully automated weekly cycle** - syncs the schedule, pulls odds, locks
   parlays at kickoff, grades results, and settles the weekly winner on its
   own schedule.
-  No manual intervention needed once it's running.
+  The moment a week is settled, it rolls straight into syncing next week and
+  announcing it - no manual intervention needed once it's running.
 - **Patch notes on deploy** - posts what changed to your configured channel
   automatically whenever you push an update and restart it.
 - **Team flair** - `/flair set` gives you a colored role (with the team's

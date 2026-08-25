@@ -85,8 +85,19 @@ async def grade_week_job(bot) -> dict:
             crown = " 🏆" if row["is_weekly_winner"] else ""
             lines.append(f"{i}. <@{row['user_id']}> — ${row['current_balance']:.2f}{crown}")
         await bot.announce("\n".join(lines))
+
     if result["graded"]:
         await status_panel.refresh(bot)
+
+    if winners:
+        # the week just wrapped up - roll straight into whatever CFBD has
+        # lined up next instead of waiting for Tuesday's scheduled sync, so
+        # opting in for next week (and its own "Week N is open" announcement)
+        # is available right away. A no-op if CFBD hasn't published next
+        # week's games yet - sync_week_games handles that gracefully, and
+        # does its own extra panel refresh on top if it does find one.
+        await sync_week_games(bot)
+
     return result
 
 
