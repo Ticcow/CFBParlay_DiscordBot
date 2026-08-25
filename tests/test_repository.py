@@ -761,6 +761,33 @@ def test_delete_week_cascade_removes_everything_under_the_week(conn):
     assert rankings == []
 
 
+def test_reset_week_bets_clears_parlays_and_participants_but_keeps_the_schedule(conn):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(conn, week_id, [make_game()])
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    repository.insert_odds_snapshot(conn, game["id"], make_odds_event(), flipped=False)
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
+    repository.replace_rankings(conn, week_id, [RankedTeam(1, "Texas")])
+    participant = repository.opt_in(conn, user_id=7, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 7, week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "spread", "home", -6.5, -110)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 190.91)
+
+    result = repository.reset_week_bets(conn, week_id)
+
+    assert result == {"parlays_removed": 1, "participants_removed": 1}
+    assert repository.get_parlay(conn, parlay_id) is None
+    assert repository.get_participant(conn, 7, week_id) is None
+    legs = conn.execute("SELECT * FROM parlay_legs WHERE parlay_id = ?", (parlay_id,)).fetchall()
+    assert legs == []
+    # the schedule itself survives - no re-sync needed to bet again
+    assert repository.get_week(conn, week_id) is not None
+    assert repository.get_game(conn, game["id"]) is not None
+    assert repository.get_latest_odds_snapshot(conn, game["id"]) is not None
+    rankings = conn.execute("SELECT * FROM rankings WHERE week_id = ?", (week_id,)).fetchall()
+    assert len(rankings) == 1
+
+
 # --- bot_state key/value store ---
 
 

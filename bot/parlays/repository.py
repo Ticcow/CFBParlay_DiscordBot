@@ -854,6 +854,26 @@ def delete_week_cascade(conn: sqlite3.Connection, week_id: int) -> int:
     return game_count
 
 
+def reset_week_bets(conn: sqlite3.Connection, week_id: int) -> dict:
+    """Clears everyone's opt-ins and parlays for a week - a do-over on the
+    betting side only. Leaves the week's games, odds, and rankings untouched,
+    so nobody has to wait on a re-sync before betting again."""
+    parlay_count = conn.execute(
+        "SELECT COUNT(*) FROM parlays WHERE week_id = ?", (week_id,)
+    ).fetchone()[0]
+    participant_count = conn.execute(
+        "SELECT COUNT(*) FROM week_participants WHERE week_id = ?", (week_id,)
+    ).fetchone()[0]
+    conn.execute(
+        "DELETE FROM parlay_legs WHERE parlay_id IN (SELECT id FROM parlays WHERE week_id = ?)",
+        (week_id,),
+    )
+    conn.execute("DELETE FROM parlays WHERE week_id = ?", (week_id,))
+    conn.execute("DELETE FROM week_participants WHERE week_id = ?", (week_id,))
+    conn.commit()
+    return {"parlays_removed": parlay_count, "participants_removed": participant_count}
+
+
 def get_state(conn: sqlite3.Connection, key: str) -> str | None:
     row = conn.execute("SELECT value FROM bot_state WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else None

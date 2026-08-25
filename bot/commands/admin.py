@@ -36,6 +36,14 @@ TEST_GAMES = [
 ]
 TEST_RANKINGS = [(1, "Georgia"), (2, "Ohio State"), (3, "Alabama"), (4, "Michigan"), (5, "Notre Dame")]
 
+# Resetting a week deletes real bets/opt-ins, unlike the rest of /admin (sync,
+# refresh, grade) which is safe for anyone to run - so this one command gets
+# an actual permission check instead of staying open to the whole server.
+RESET_WEEK_ALLOWED_USER_IDS = {
+    151856216858034176,  # Tenenbaum
+    151910709322711040,  # Ticcow
+}
+
 
 def _get_test_week(bot):
     """The synthetic test week specifically, never "whatever week is latest" -
@@ -160,6 +168,30 @@ async def handle_sync_all(interaction: discord.Interaction) -> None:
 async def handle_refresh_panel(interaction: discord.Interaction) -> None:
     await status_panel.refresh(interaction.client)
     await interaction.response.send_message("Panel refreshed.", ephemeral=True)
+
+
+async def handle_reset_week(interaction: discord.Interaction) -> None:
+    if interaction.user.id not in RESET_WEEK_ALLOWED_USER_IDS:
+        await interaction.response.send_message(
+            "Only Tenenbaum or Ticcow can reset a week.", ephemeral=True
+        )
+        return
+
+    bot = interaction.client
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    week = repository.get_latest_week(bot.conn)
+    if week is None:
+        await interaction.followup.send("No week is open yet.", ephemeral=True)
+        return
+
+    result = repository.reset_week_bets(bot.conn, week["id"])
+    await interaction.followup.send(
+        f"Reset Week {week['week_number']} - removed {result['parlays_removed']} parlay(s) "
+        f"and {result['participants_removed']} opt-in(s). Games/odds/rankings are untouched, "
+        "so everyone can /optin fresh without waiting on a re-sync.",
+        ephemeral=True,
+    )
+    await status_panel.refresh(bot)
 
 
 class AdminCog(commands.GroupCog, name="admin"):
@@ -404,6 +436,13 @@ class AdminCog(commands.GroupCog, name="admin"):
     )
     async def refresh_panel_cmd(self, interaction: discord.Interaction):
         await handle_refresh_panel(interaction)
+
+    @app_commands.command(
+        name="reset-week",
+        description="[Tenenbaum/Ticcow only] Clear everyone's opt-ins and parlays for the current week",
+    )
+    async def reset_week_cmd(self, interaction: discord.Interaction):
+        await handle_reset_week(interaction)
 
     @app_commands.command(
         name="cleanup-channel",
