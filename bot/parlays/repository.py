@@ -247,35 +247,48 @@ def get_game(conn: sqlite3.Connection, game_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
 
 
-def search_games(
-    conn: sqlite3.Connection, week_id: int, query: str, limit: int = 25
+def _available_games_for_leg(
+    conn: sqlite3.Connection, week_id: int, parlay_id: int, now
 ) -> list[sqlite3.Row]:
-    like = f"%{query}%"
-    return conn.execute(
-        """
-        SELECT * FROM games WHERE week_id = ? AND (home_team LIKE ? OR away_team LIKE ?)
-        ORDER BY start_time_utc LIMIT ?
-        """,
-        (week_id, like, like, limit),
+    """Games in this week that haven't started and aren't already a leg on
+    this parlay, in kickoff order - the shared base list both the paginated
+    browse view and the team-name search filter down from."""
+    used_game_ids = {leg["game_id"] for leg in list_legs(conn, parlay_id)}
+    all_games = conn.execute(
+        "SELECT * FROM games WHERE week_id = ? ORDER BY start_time_utc", (week_id,)
     ).fetchall()
+    return [
+        game
+        for game in all_games
+        if timeutils.parse_utc(game["start_time_utc"]) > now and game["id"] not in used_game_ids
+    ]
 
 
 def list_available_games_for_leg(
     conn: sqlite3.Connection, week_id: int, parlay_id: int, now, page: int = 0, page_size: int = 25
 ) -> tuple[list[sqlite3.Row], int]:
-    """Games in this week that haven't started and aren't already a leg on this
-    parlay, one page at a time. Returns (page_of_games, total_available_count)."""
-    used_game_ids = {leg["game_id"] for leg in list_legs(conn, parlay_id)}
-    all_games = conn.execute(
-        "SELECT * FROM games WHERE week_id = ? ORDER BY start_time_utc", (week_id,)
-    ).fetchall()
-    upcoming = [
-        game
-        for game in all_games
-        if timeutils.parse_utc(game["start_time_utc"]) > now and game["id"] not in used_game_ids
-    ]
+    """One page of _available_games_for_leg. Returns (page_of_games, total_available_count)."""
+    upcoming = _available_games_for_leg(conn, week_id, parlay_id, now)
     start = page * page_size
     return upcoming[start : start + page_size], len(upcoming)
+
+
+def search_available_games_for_leg(
+    conn: sqlite3.Connection, week_id: int, parlay_id: int, now, query: str, limit: int = 25
+) -> list[sqlite3.Row]:
+    """Same eligibility as list_available_games_for_leg (not started, not
+    already on this parlay), filtered to games where either team's name
+    contains the search text - case-insensitive substring, not a prefix, so
+    "state" finds every "X State" team."""
+    needle = query.strip().lower()
+    if not needle:
+        return _available_games_for_leg(conn, week_id, parlay_id, now)[:limit]
+    matches = [
+        game
+        for game in _available_games_for_leg(conn, week_id, parlay_id, now)
+        if needle in game["home_team"].lower() or needle in game["away_team"].lower()
+    ]
+    return matches[:limit]
 
 
 def list_ranked_games_for_leg(

@@ -522,6 +522,77 @@ def test_list_available_games_for_leg_paginates(conn):
     assert len(page1) == 5
 
 
+def test_search_available_games_for_leg_matches_either_side_case_insensitively(conn):
+    import datetime
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    now = datetime.datetime(2026, 8, 28, tzinfo=datetime.timezone.utc)
+    future = (now + datetime.timedelta(hours=1)).isoformat()
+    repository.upsert_games(
+        conn,
+        week_id,
+        [
+            CfbdGame(1, "Texas", "Ohio State", future, "scheduled", None, None),
+            CfbdGame(2, "Michigan State", "Notre Dame", future, "scheduled", None, None),
+            CfbdGame(3, "Alabama", "Georgia", future, "scheduled", None, None),
+        ],
+    )
+    parlay_id = repository.start_parlay(conn, user_id=1, week_id=week_id)
+
+    by_home = repository.search_available_games_for_leg(conn, week_id, parlay_id, now, "texas")
+    by_away = repository.search_available_games_for_leg(conn, week_id, parlay_id, now, "notre")
+    by_substring = repository.search_available_games_for_leg(conn, week_id, parlay_id, now, "state")
+    no_match = repository.search_available_games_for_leg(conn, week_id, parlay_id, now, "purdue")
+
+    assert [g["home_team"] for g in by_home] == ["Texas"]
+    assert [g["home_team"] for g in by_away] == ["Michigan State"]
+    # matches both "Michigan State" (home) and "Ohio State" (away, on the Texas game)
+    assert {g["home_team"] for g in by_substring} == {"Texas", "Michigan State"}
+    assert no_match == []
+
+
+def test_search_available_games_for_leg_excludes_started_and_already_used(conn):
+    import datetime
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    now = datetime.datetime(2026, 8, 28, tzinfo=datetime.timezone.utc)
+    past = (now - datetime.timedelta(hours=1)).isoformat()
+    future = (now + datetime.timedelta(hours=1)).isoformat()
+    repository.upsert_games(
+        conn,
+        week_id,
+        [
+            CfbdGame(1, "Texas", "Ohio State", past, "scheduled", None, None),
+            CfbdGame(2, "Texas State", "Rice", future, "scheduled", None, None),
+        ],
+    )
+    parlay_id = repository.start_parlay(conn, user_id=1, week_id=week_id)
+    started_game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    event = OddsEvent("Texas", "Ohio State", past, "draftkings", moneyline_home=-150, moneyline_away=130)
+    repository.insert_odds_snapshot(conn, started_game["id"], event, flipped=False)
+    snapshot = repository.get_latest_odds_snapshot(conn, started_game["id"])
+    repository.add_leg(conn, parlay_id, started_game["id"], snapshot["id"], "moneyline", "home", None, -150)
+
+    results = repository.search_available_games_for_leg(conn, week_id, parlay_id, now, "texas")
+
+    # the already-started Texas game is excluded even though it matches "texas" too
+    assert [g["home_team"] for g in results] == ["Texas State"]
+
+
+def test_search_available_games_for_leg_blank_query_returns_all_available(conn):
+    import datetime
+
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    now = datetime.datetime(2026, 8, 28, tzinfo=datetime.timezone.utc)
+    future = (now + datetime.timedelta(hours=1)).isoformat()
+    repository.upsert_games(conn, week_id, [CfbdGame(1, "Texas", "Ohio State", future, "scheduled", None, None)])
+    parlay_id = repository.start_parlay(conn, user_id=1, week_id=week_id)
+
+    results = repository.search_available_games_for_leg(conn, week_id, parlay_id, now, "   ")
+
+    assert [g["home_team"] for g in results] == ["Texas"]
+
+
 # --- rankings / team logos ---
 
 

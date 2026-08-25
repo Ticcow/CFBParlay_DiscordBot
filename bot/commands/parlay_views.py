@@ -169,8 +169,7 @@ class RankedGamePickerView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _on_show_all(self, interaction: discord.Interaction):
-        embed = discord.Embed(title="Add a leg", description="Pick a game from the dropdown below.")
-        view = GamePickerView(self.bot, self.parlay_id, self.week_id, page=0)
+        embed, view = _game_picker_screen(self.bot, self.parlay_id, self.week_id)
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _on_back(self, interaction: discord.Interaction):
@@ -178,21 +177,41 @@ class RankedGamePickerView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
+def _game_picker_description(query: str | None) -> str:
+    if query:
+        return f'Showing games matching "{query}".'
+    return "Pick a game from the dropdown below, or tap Search to find a team."
+
+
+def _game_picker_screen(
+    bot, parlay_id: int, week_id: int, page: int = 0, query: str | None = None
+) -> tuple[discord.Embed, "GamePickerView"]:
+    embed = discord.Embed(title="Add a leg", description=_game_picker_description(query))
+    return embed, GamePickerView(bot, parlay_id, week_id, page=page, query=query)
+
+
 class GamePickerView(discord.ui.View):
-    def __init__(self, bot, parlay_id: int, week_id: int, page: int = 0):
+    def __init__(self, bot, parlay_id: int, week_id: int, page: int = 0, query: str | None = None):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.bot = bot
         self.parlay_id = parlay_id
         self.week_id = week_id
         self.page = page
+        self.query = query
         self._build()
 
     def _build(self):
         self.clear_items()
         now = timeutils.utc_now()
-        games, total = repository.list_available_games_for_leg(
-            self.bot.conn, self.week_id, self.parlay_id, now, self.page, PAGE_SIZE
-        )
+        if self.query:
+            games = repository.search_available_games_for_leg(
+                self.bot.conn, self.week_id, self.parlay_id, now, self.query, limit=PAGE_SIZE
+            )
+            total = len(games)
+        else:
+            games, total = repository.list_available_games_for_leg(
+                self.bot.conn, self.week_id, self.parlay_id, now, self.page, PAGE_SIZE
+            )
 
         options = [
             discord.SelectOption(
@@ -202,22 +221,34 @@ class GamePickerView(discord.ui.View):
             )
             for g in games
         ]
+        no_results_label = (
+            f'No games match "{self.query}"' if self.query and not options else "No games available"
+        )
         select = discord.ui.Select(
-            placeholder="Choose a game..." if options else "No games available",
-            options=options or [discord.SelectOption(label="No games available", value="none")],
+            placeholder="Choose a game..." if options else no_results_label,
+            options=options or [discord.SelectOption(label=no_results_label, value="none")],
             disabled=not options,
         )
         select.callback = self._on_select
         self.add_item(select)
 
-        if self.page > 0:
-            prev_button = discord.ui.Button(label="◀ Prev", style=discord.ButtonStyle.secondary)
-            prev_button.callback = self._on_prev
-            self.add_item(prev_button)
-        if (self.page + 1) * PAGE_SIZE < total:
-            next_button = discord.ui.Button(label="Next ▶", style=discord.ButtonStyle.secondary)
-            next_button.callback = self._on_next
-            self.add_item(next_button)
+        search_button = discord.ui.Button(label="🔍 Search", style=discord.ButtonStyle.secondary)
+        search_button.callback = self._on_search
+        self.add_item(search_button)
+
+        if self.query:
+            clear_button = discord.ui.Button(label="Clear Search", style=discord.ButtonStyle.secondary)
+            clear_button.callback = self._on_clear_search
+            self.add_item(clear_button)
+        else:
+            if self.page > 0:
+                prev_button = discord.ui.Button(label="◀ Prev", style=discord.ButtonStyle.secondary)
+                prev_button.callback = self._on_prev
+                self.add_item(prev_button)
+            if (self.page + 1) * PAGE_SIZE < total:
+                next_button = discord.ui.Button(label="Next ▶", style=discord.ButtonStyle.secondary)
+                next_button.callback = self._on_next
+                self.add_item(next_button)
 
         back_button = discord.ui.Button(label="Back", style=discord.ButtonStyle.danger)
         back_button.callback = self._on_back
@@ -228,6 +259,16 @@ class GamePickerView(discord.ui.View):
         game = repository.get_game(self.bot.conn, game_id)
         embed, view = _market_screen(self.bot, self.parlay_id, self.week_id, game)
         await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _on_search(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(GameSearchModal(self))
+
+    async def _on_clear_search(self, interaction: discord.Interaction):
+        self.query = None
+        self.page = 0
+        self._build()
+        embed = discord.Embed(title="Add a leg", description=_game_picker_description(None))
+        await interaction.response.edit_message(embed=embed, view=self)
 
     async def _on_prev(self, interaction: discord.Interaction):
         self.page -= 1
@@ -241,6 +282,28 @@ class GamePickerView(discord.ui.View):
 
     async def _on_back(self, interaction: discord.Interaction):
         embed, view = _ranked_screen(self.bot, self.parlay_id, self.week_id)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class GameSearchModal(discord.ui.Modal, title="Search Games"):
+    """Opened by GamePickerView's Search button - a button click can't carry
+    free text, so this collects a search term and hands it back to the same
+    picker view to re-filter its dropdown."""
+
+    query = discord.ui.TextInput(
+        label="Team name (or part of it)", placeholder="e.g. Purdue, Ohio State, Indiana", max_length=100
+    )
+
+    def __init__(self, picker_view: GamePickerView):
+        super().__init__()
+        self.picker_view = picker_view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        view = self.picker_view
+        view.query = str(self.query.value).strip()
+        view.page = 0
+        view._build()
+        embed = discord.Embed(title="Add a leg", description=_game_picker_description(view.query))
         await interaction.response.edit_message(embed=embed, view=view)
 
 
