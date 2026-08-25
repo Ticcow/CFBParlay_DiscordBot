@@ -747,6 +747,23 @@ def season_money_leaderboard(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def season_combined_leaderboard(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Weekly-win count and season net winnings together, one row per user who's
+    ever opted in - ranked by wins first, net winnings as the tiebreaker. Unlike
+    season_wins_leaderboard this includes people with zero wins so far, since
+    the panel's combined view should show where everyone stands, not just winners."""
+    return conn.execute(
+        """
+        SELECT user_id,
+               SUM(CASE WHEN is_weekly_winner = 1 THEN 1 ELSE 0 END) AS wins,
+               SUM(current_balance - starting_balance) AS net
+        FROM week_participants
+        GROUP BY user_id
+        ORDER BY wins DESC, net DESC
+        """
+    ).fetchall()
+
+
 def get_user_weekly_win_count(conn: sqlite3.Connection, user_id: int) -> int:
     row = conn.execute(
         "SELECT COUNT(*) FROM week_participants WHERE user_id = ? AND is_weekly_winner = 1",

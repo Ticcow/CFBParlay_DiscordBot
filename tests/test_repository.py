@@ -415,6 +415,30 @@ def test_season_money_leaderboard_sums_net_across_weeks(conn):
     assert rows[0]["net"] == pytest.approx(100.0)  # +200 week1, -100 week2
 
 
+def test_season_combined_leaderboard_ranks_by_wins_then_net(conn):
+    week1 = repository.upsert_week(conn, 2026, 1, "regular")
+    week2 = repository.upsert_week(conn, 2026, 2, "regular")
+    repository.opt_in(conn, user_id=1, week_id=week1)  # 1 win, but less net than user 2
+    repository.opt_in(conn, user_id=2, week_id=week1)  # 0 wins, but sitting on more money
+    repository.opt_in(conn, user_id=2, week_id=week2)
+    conn.execute("UPDATE week_participants SET is_weekly_winner = 1 WHERE user_id = 1")
+    conn.execute(
+        "UPDATE week_participants SET current_balance = 1050 WHERE user_id = 1 AND week_id = ?", (week1,)
+    )
+    conn.execute(
+        "UPDATE week_participants SET current_balance = 2000 WHERE user_id = 2 AND week_id = ?", (week2,)
+    )
+    conn.commit()
+
+    rows = repository.season_combined_leaderboard(conn)
+
+    assert [r["user_id"] for r in rows] == [1, 2]  # user 1 ranked first purely on win count
+    assert rows[0]["wins"] == 1
+    assert rows[0]["net"] == pytest.approx(50.0)
+    assert rows[1]["wins"] == 0
+    assert rows[1]["net"] == pytest.approx(1000.0)  # 0 net week1 (untouched) + 1000 net week2
+
+
 def test_get_user_parlay_record_counts_by_result(conn):
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     repository.upsert_games(conn, week_id, [make_game()])

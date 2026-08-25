@@ -11,6 +11,7 @@ logger = logging.getLogger("degen_bot.panel")
 
 PANEL_EMBED_TITLE = "🎰 Degen Bot — Week Status"
 MAX_BET_FIELDS = 20
+MAX_LEADERBOARD_ROWS = 10
 
 HOW_TO_PLAY = (
     "🎲 **Opt In** — join the week with a $1,000 bankroll\n"
@@ -110,9 +111,25 @@ class PanelActionsView(discord.ui.View):
         await admin.handle_refresh_panel(interaction)
 
 
+def _add_season_leaderboard_field(bot, embed: discord.Embed) -> None:
+    rows = repository.season_combined_leaderboard(bot.conn)
+    if not rows:
+        return  # nobody has ever opted in yet - nothing to show
+    lines = []
+    for i, row in enumerate(rows[:MAX_LEADERBOARD_ROWS], start=1):
+        wins = row["wins"] or 0
+        net = row["net"] or 0.0
+        win_word = "win" if wins == 1 else "wins"
+        lines.append(f"{i}. <@{row['user_id']}> — {wins} {win_word} (${net:.2f} net)")
+    if len(rows) > MAX_LEADERBOARD_ROWS:
+        lines.append(f"...and {len(rows) - MAX_LEADERBOARD_ROWS} more")
+    embed.add_field(name="🏆 Season Leaderboard", value="\n".join(lines)[:1024], inline=False)
+
+
 def _build_embed(bot, week) -> discord.Embed:
     embed = discord.Embed(title=PANEL_EMBED_TITLE, color=discord.Color.gold())
     embed.add_field(name="How to Play", value=HOW_TO_PLAY, inline=False)
+    _add_season_leaderboard_field(bot, embed)
 
     if week is None:
         embed.description = "No week is open yet."
