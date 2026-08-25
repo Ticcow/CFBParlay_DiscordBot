@@ -4,6 +4,7 @@ from datetime import timedelta
 
 import discord
 
+from bot.commands.discord_names import resolve_username
 from bot.config import settings
 from bot.parlays import formatting, repository
 
@@ -126,7 +127,7 @@ def _add_season_leaderboard_field(bot, embed: discord.Embed) -> None:
     embed.add_field(name="🏆 Season Leaderboard", value="\n".join(lines)[:1024], inline=False)
 
 
-def _build_embed(bot, week) -> discord.Embed:
+async def _build_embed(bot, week) -> discord.Embed:
     embed = discord.Embed(title=PANEL_EMBED_TITLE, color=discord.Color.gold())
     embed.add_field(name="How to Play", value=HOW_TO_PLAY, inline=False)
     _add_season_leaderboard_field(bot, embed)
@@ -161,9 +162,10 @@ def _build_embed(bot, week) -> discord.Embed:
             leg_text = "\n".join(formatting.format_leg(leg) for leg in legs)
             wager = f"${parlay['wager_dollars']:.2f}" if parlay["wager_dollars"] is not None else "-"
             payout_text, status_label = formatting.format_payout_and_status(parlay)
+            username = await resolve_username(bot, parlay["user_id"])
 
             embed.add_field(
-                name=f"<@{parlay['user_id']}> — {wager} wager → {payout_text} [{status_label}]",
+                name=f"{username} — {wager} wager → {payout_text} [{status_label}]",
                 value=leg_text[:1024],
                 inline=False,
             )
@@ -210,7 +212,7 @@ async def refresh(bot) -> None:
             return
 
         week = repository.get_latest_week(bot.conn)
-        embed = _build_embed(bot, week)
+        embed = await _build_embed(bot, week)
         view = PanelActionsView(week_is_open=week is not None)
 
         old_message = _panels.get(channel_id)

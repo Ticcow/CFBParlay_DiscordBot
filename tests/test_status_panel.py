@@ -9,45 +9,57 @@ from bot.integrations.odds_client import OddsEvent
 from bot.parlays import grading, payout, repository, timeutils
 
 
+class FakeUser:
+    def __init__(self, user_id):
+        self.id = user_id
+        self.name = f"user{user_id}"
+
+
 class FakeBot:
     def __init__(self, conn):
         self.conn = conn
 
+    def get_user(self, user_id):
+        return None  # force resolve_username through the fetch path below
 
-def test_build_embed_with_no_week(conn):
-    embed = status_panel._build_embed(FakeBot(conn), None)
+    async def fetch_user(self, user_id):
+        return FakeUser(user_id)
+
+
+async def test_build_embed_with_no_week(conn):
+    embed = await status_panel._build_embed(FakeBot(conn), None)
     assert embed.description == "No week is open yet."
 
 
-def test_build_embed_always_shows_how_to_play(conn):
-    embed_no_week = status_panel._build_embed(FakeBot(conn), None)
+async def test_build_embed_always_shows_how_to_play(conn):
+    embed_no_week = await status_panel._build_embed(FakeBot(conn), None)
     how_to_play_no_week = next(f for f in embed_no_week.fields if f.name == "How to Play")
     assert "Opt In" in how_to_play_no_week.value
     assert "Start Parlay" in how_to_play_no_week.value
 
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     week = repository.get_week(conn, week_id)
-    embed_with_week = status_panel._build_embed(FakeBot(conn), week)
+    embed_with_week = await status_panel._build_embed(FakeBot(conn), week)
     how_to_play_with_week = next(f for f in embed_with_week.fields if f.name == "How to Play")
     assert how_to_play_with_week.value == how_to_play_no_week.value
 
 
-def test_build_embed_with_no_participants(conn):
+async def test_build_embed_with_no_participants(conn):
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     week = repository.get_week(conn, week_id)
 
-    embed = status_panel._build_embed(FakeBot(conn), week)
+    embed = await status_panel._build_embed(FakeBot(conn), week)
 
     standings_field = next(f for f in embed.fields if f.name == "Standings")
     assert "Nobody has opted in" in standings_field.value
 
 
-def test_build_embed_with_participants_and_no_bets(conn):
+async def test_build_embed_with_participants_and_no_bets(conn):
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     repository.opt_in(conn, user_id=1, week_id=week_id)
     week = repository.get_week(conn, week_id)
 
-    embed = status_panel._build_embed(FakeBot(conn), week)
+    embed = await status_panel._build_embed(FakeBot(conn), week)
 
     standings_field = next(f for f in embed.fields if "Standings" in f.name)
     assert "1000.00" in standings_field.value
@@ -73,39 +85,53 @@ def _seed_submitted_parlay(conn, start_offset_hours):
     return week_id
 
 
-def test_build_embed_shows_bet_details_even_before_kickoff(conn):
+async def test_build_embed_shows_bet_details_even_before_kickoff(conn):
     week_id = _seed_submitted_parlay(conn, start_offset_hours=5)  # game hasn't started yet
     week = repository.get_week(conn, week_id)
 
-    embed = status_panel._build_embed(FakeBot(conn), week)
+    embed = await status_panel._build_embed(FakeBot(conn), week)
 
     bet_fields = [f for f in embed.fields if "Texas" in f.value]
     assert bet_fields, "bets should be visible immediately, not hidden until kickoff"
 
 
-def test_build_embed_shows_potential_payout_before_grading(conn):
+async def test_build_embed_shows_potential_payout_before_grading(conn):
     week_id = _seed_submitted_parlay(conn, start_offset_hours=5)
     week = repository.get_week(conn, week_id)
 
-    embed = status_panel._build_embed(FakeBot(conn), week)
+    embed = await status_panel._build_embed(FakeBot(conn), week)
 
     bet_field = next(f for f in embed.fields if "Texas" in f.value)
     assert "potential" in bet_field.name
     assert "[submitted]" in bet_field.name
 
 
-def test_build_embed_shows_actual_payout_and_result_once_graded(conn):
+async def test_build_embed_shows_actual_payout_and_result_once_graded(conn):
     week_id = _seed_submitted_parlay(conn, start_offset_hours=-1)  # game already started
     week = repository.get_week(conn, week_id)
     game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
     repository.set_game_final_score(conn, game["id"], home_score=24, away_score=17)  # Texas (home) wins
     grading.grade_week(conn, week_id)
 
-    embed = status_panel._build_embed(FakeBot(conn), week)
+    embed = await status_panel._build_embed(FakeBot(conn), week)
 
     bet_field = next(f for f in embed.fields if "Texas" in f.value)
     assert "payout" in bet_field.name
     assert "[WIN]" in bet_field.name
+
+
+async def test_build_embed_bets_field_name_uses_plain_username_not_a_mention(conn):
+    # embed field *names* don't resolve <@id> mentions the way field values
+    # and message content do - Discord just shows the literal raw text - so
+    # the Bets field name must carry the already-resolved plain username
+    week_id = _seed_submitted_parlay(conn, start_offset_hours=5)
+    week = repository.get_week(conn, week_id)
+
+    embed = await status_panel._build_embed(FakeBot(conn), week)
+
+    bet_field = next(f for f in embed.fields if "Texas" in f.value)
+    assert bet_field.name.startswith("user1 —")
+    assert "<@" not in bet_field.name
 
 
 # --- cleanup_channel ---

@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.commands.discord_names import resolve_username
 from bot.parlays import formatting, repository
 
 MAX_PARLAY_FIELDS = 20
@@ -36,8 +37,9 @@ class LeaderboardCog(commands.Cog):
                 f"${parlay['wager_dollars']:.2f}" if parlay["wager_dollars"] is not None else "-"
             )
             payout_text, status_label = formatting.format_payout_and_status(parlay)
+            username = await resolve_username(self.bot, parlay["user_id"])
             embed.add_field(
-                name=f"<@{parlay['user_id']}> — #{parlay['id']} [{status_label}] "
+                name=f"{username} — #{parlay['id']} [{status_label}] "
                 f"{wager} wager → {payout_text}",
                 value=leg_text[:1024],
                 inline=False,
