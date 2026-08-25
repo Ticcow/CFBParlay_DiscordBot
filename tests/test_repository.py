@@ -203,6 +203,19 @@ def test_sync_odds_for_week_fuzzy_match_ignores_accents_and_apostrophes(conn):
     assert result.matched == 1
 
 
+def test_sync_odds_for_week_fuzzy_match_ignores_a_leading_the(conn):
+    # CFBD's official name is "The Citadel" - the-odds-api just says "Citadel"
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Charlotte", "The Citadel", "2026-08-29T19:00:00Z", "scheduled", None, None)]
+    )
+
+    event = make_odds_event(home_team_raw="Charlotte 49ers", away_team_raw="Citadel Bulldogs")
+    result = repository.sync_odds_for_week(conn, week_id, [event])
+
+    assert result.matched == 1
+
+
 def test_sync_odds_for_week_leaves_a_real_non_fbs_opponent_unmatched(conn):
     # Buffalo's FBS game is tracked, but its FCS opponent Albany never was -
     # fuzzy matching shouldn't invent a match for a team we don't have on file

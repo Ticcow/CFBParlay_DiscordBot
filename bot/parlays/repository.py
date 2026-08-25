@@ -102,12 +102,17 @@ def find_game_by_teams(
 def _normalize_team_name(name: str) -> str:
     """Lowercased, accent-stripped, punctuation-stripped comparison form -
     "San José State" and "Hawai'i" fold to the same shape "the-odds-api"
-    uses ("San Jose State Spartans", "Hawaii Rainbow Warriors")."""
+    uses ("San Jose State Spartans", "Hawaii Rainbow Warriors"). Also drops a
+    leading "the " - CFBD's official name for a school like The Citadel
+    includes it, but the-odds-api's "Citadel Bulldogs" doesn't."""
     decomposed = unicodedata.normalize("NFKD", name)
     ascii_only = "".join(c for c in decomposed if not unicodedata.combining(c))
     no_apostrophes = ascii_only.replace("'", "").replace("’", "")
     cleaned = re.sub(r"[^a-z0-9 ]", " ", no_apostrophes.lower())
-    return re.sub(r"\s+", " ", cleaned).strip()
+    collapsed = re.sub(r"\s+", " ", cleaned).strip()
+    if collapsed.startswith("the "):
+        collapsed = collapsed[len("the ") :]
+    return collapsed
 
 
 def _list_school_names_for_week(conn: sqlite3.Connection, week_id: int) -> list[str]:
