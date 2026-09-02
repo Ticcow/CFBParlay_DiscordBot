@@ -11,7 +11,7 @@ from bot.parlays import formatting, repository
 logger = logging.getLogger("degen_bot.panel")
 
 PANEL_EMBED_TITLE = "🎰 Degen Bot — Week Status"
-MAX_BET_FIELDS = 20
+MAX_BET_USER_FIELDS = 15
 MAX_LEADERBOARD_ROWS = 10
 
 HOW_TO_PLAY = (
@@ -157,21 +157,42 @@ async def _build_embed(bot, week) -> discord.Embed:
     if not submitted:
         embed.add_field(name="Bets", value="No parlays submitted yet.", inline=False)
     else:
-        for parlay in submitted[:MAX_BET_FIELDS]:
-            legs = repository.list_legs_with_games(bot.conn, parlay["id"])
-            leg_text = "\n".join(formatting.format_leg(leg) for leg in legs)
-            wager = f"${parlay['wager_dollars']:.2f}" if parlay["wager_dollars"] is not None else "-"
-            payout_text, status_label = formatting.format_payout_and_status(parlay)
-            username = await resolve_username(bot, parlay["user_id"])
+        # one field per bettor rather than per parlay - keeps the panel readable
+        # once someone has several parlays going; full per-leg detail lives in
+        # /parlays instead
+        by_user: dict[int, list] = {}
+        for parlay in submitted:
+            by_user.setdefault(parlay["user_id"], []).append(parlay)
 
+        user_ids = list(by_user.keys())[:MAX_BET_USER_FIELDS]
+        for user_id in user_ids:
+            parlays = by_user[user_id]
+            username = await resolve_username(bot, user_id)
+            lines = []
+            total_payout = 0.0
+            for i, parlay in enumerate(parlays, start=1):
+                legs = repository.list_legs_with_games(bot.conn, parlay["id"])
+                markers = "".join(formatting.LEG_RESULT_MARKERS.get(leg["result"], "⏳") for leg in legs)
+                wager = f"${parlay['wager_dollars']:.2f}" if parlay["wager_dollars"] is not None else "-"
+                payout_text, status_label = formatting.format_payout_and_status(parlay)
+                amount = (
+                    parlay["actual_payout_dollars"]
+                    if parlay["status"] == "graded"
+                    else parlay["potential_payout_dollars"]
+                )
+                total_payout += amount or 0.0
+                lines.append(f"{i}. {markers} — {wager} wager → {payout_text} [{status_label}]")
+
+            parlay_word = "parlay" if len(parlays) == 1 else "parlays"
+            payout_word = "payout" if all(p["status"] == "graded" for p in parlays) else "potential payout"
             embed.add_field(
-                name=f"{username} — {wager} wager → {payout_text} [{status_label}]",
-                value=leg_text[:1024],
+                name=f"{username} — {len(parlays)} {parlay_word} → ${total_payout:.2f} {payout_word}",
+                value="\n".join(lines)[:1024],
                 inline=False,
             )
-        if len(submitted) > MAX_BET_FIELDS:
+        if len(by_user) > MAX_BET_USER_FIELDS:
             embed.add_field(
-                name="...", value=f"+{len(submitted) - MAX_BET_FIELDS} more parlay(s) not shown", inline=False
+                name="...", value=f"+{len(by_user) - MAX_BET_USER_FIELDS} more player(s) not shown", inline=False
             )
 
     embed.set_footer(text="More: /balance, /parlays, /leaderboard, /mystats, /history")

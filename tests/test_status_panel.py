@@ -91,8 +91,9 @@ async def test_build_embed_shows_bet_details_even_before_kickoff(conn):
 
     embed = await status_panel._build_embed(FakeBot(conn), week)
 
-    bet_fields = [f for f in embed.fields if "Texas" in f.value]
+    bet_fields = [f for f in embed.fields if f.name.startswith("user1 —")]
     assert bet_fields, "bets should be visible immediately, not hidden until kickoff"
+    assert "1. ⏳" in bet_fields[0].value
 
 
 async def test_build_embed_shows_potential_payout_before_grading(conn):
@@ -101,9 +102,9 @@ async def test_build_embed_shows_potential_payout_before_grading(conn):
 
     embed = await status_panel._build_embed(FakeBot(conn), week)
 
-    bet_field = next(f for f in embed.fields if "Texas" in f.value)
+    bet_field = next(f for f in embed.fields if f.name.startswith("user1 —"))
     assert "potential" in bet_field.name
-    assert "[submitted]" in bet_field.name
+    assert "[submitted]" in bet_field.value
 
 
 async def test_build_embed_shows_actual_payout_and_result_once_graded(conn):
@@ -115,9 +116,31 @@ async def test_build_embed_shows_actual_payout_and_result_once_graded(conn):
 
     embed = await status_panel._build_embed(FakeBot(conn), week)
 
-    bet_field = next(f for f in embed.fields if "Texas" in f.value)
+    bet_field = next(f for f in embed.fields if f.name.startswith("user1 —"))
     assert "payout" in bet_field.name
-    assert "[WIN]" in bet_field.name
+    assert "potential" not in bet_field.name
+    assert "[WIN]" in bet_field.value
+
+
+async def test_build_embed_groups_multiple_parlays_under_one_field_per_user(conn):
+    # a noisy panel with one field per parlay was hard to read once someone
+    # had several parlays going - group by bettor instead, one line per parlay
+    week_id = _seed_submitted_parlay(conn, start_offset_hours=5)
+    week = repository.get_week(conn, week_id)
+    game, _ = repository.find_game_by_teams(conn, week_id, "Texas", "Ohio State")
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
+    participant = repository.get_participant(conn, 1, week_id)
+    second_parlay_id = repository.start_parlay(conn, 1, week_id)
+    repository.add_leg(conn, second_parlay_id, game["id"], snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, second_parlay_id, participant["id"], 50.0, 83.33)
+
+    embed = await status_panel._build_embed(FakeBot(conn), week)
+
+    user_bet_fields = [f for f in embed.fields if f.name.startswith("user1 —")]
+    assert len(user_bet_fields) == 1
+    assert "2 parlays" in user_bet_fields[0].name
+    assert "1. ⏳" in user_bet_fields[0].value
+    assert "2. ⏳" in user_bet_fields[0].value
 
 
 async def test_build_embed_bets_field_name_uses_plain_username_not_a_mention(conn):
@@ -129,8 +152,7 @@ async def test_build_embed_bets_field_name_uses_plain_username_not_a_mention(con
 
     embed = await status_panel._build_embed(FakeBot(conn), week)
 
-    bet_field = next(f for f in embed.fields if "Texas" in f.value)
-    assert bet_field.name.startswith("user1 —")
+    bet_field = next(f for f in embed.fields if f.name.startswith("user1 —"))
     assert "<@" not in bet_field.name
 
 
