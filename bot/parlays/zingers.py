@@ -87,20 +87,24 @@ def get_flair_reaction(team: str | None, username: str, choice_fn=random.choice)
     return line.format(user=username)
 
 
-_ELIMINATION_ZINGERS = [
-    "{user} has been eliminated. Book it.",
-    "That's it for {user} this week - parlay's dead.",
-    "{user}'s parlay just flatlined. Moment of silence.",
-    "Down goes {user}. Down goes {user}.",
-    "{user} is officially out of it. Better luck next week.",
-    "RIP {user}'s parlay - gone too soon.",
-    "{user} has left the building.",
-    "And just like that, {user} is done for the week.",
+_KNOCKOUT_ZINGERS = [
+    "{user} rode {bet} straight off a cliff.",
+    "{bet} said trust me, {user} said okay, and now {user} is done for the week.",
+    "{user}'s {bet} pick just got sent to the shadow realm.",
+    "Down goes {user} - {bet} never had a pulse.",
+    "{user} bet the fake house on {bet}. The house said no.",
+    "{bet}? {user} really believed in that one. RIP.",
+    "{user} is out. {bet} took the whole parlay down with it.",
+    "That {bet} pick just knocked {user} out cold.",
+    "{user} really thought {bet} was walking in. It did not.",
+    "{bet} - {user}'s parlay's final words.",
 ]
 
 
-def get_elimination_zinger(mention: str, choice_fn=random.choice) -> str:
-    """A one-liner for a parlay that just got mathematically eliminated -
+def get_knockout_zinger(mention: str, bet_description: str, choice_fn=random.choice) -> str:
+    """A one-liner roasting the specific pick that just busted a parlay -
     mention should be a Discord mention string like "<@123>" so it renders
-    inline as a real ping rather than plain text."""
-    return choice_fn(_ELIMINATION_ZINGERS).format(user=mention)
+    inline as a real ping rather than plain text, and bet_description a short
+    pick summary like "Texas -6.5 (-110)" (see
+    formatting.format_selection_button_label)."""
+    return choice_fn(_KNOCKOUT_ZINGERS).format(user=mention, bet=bet_description)

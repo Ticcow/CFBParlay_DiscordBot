@@ -76,6 +76,14 @@ async def grade_week_job(bot) -> dict:
     if week is None:
         return {"graded": [], "skipped_incomplete": []}
 
+    # grade_week only finalizes a parlay once every one of its legs is final,
+    # so a leg that just went final on its own (e.g. this job running as the
+    # Sunday fallback or via /admin grade-week, without poll_scores having
+    # graded it incrementally first) still needs its own knockout alert -
+    # a no-op if poll_scores already got to it, since grade_pending_legs
+    # skips anything no longer "pending".
+    await _grade_pending_and_announce(bot, week["id"])
+
     result = grading.grade_week(bot.conn, week["id"])
     winners = standings.finalize_week(bot.conn, week["id"])
     if winners:
@@ -103,11 +111,28 @@ async def grade_week_job(bot) -> dict:
 
 def _elimination_message(entry: dict) -> str:
     mention = f"<@{entry['user_id']}>"
-    return (
-        f"💀 {mention}'s parlay is eliminated!\n"
-        f"{formatting.format_leg(entry['leg'])}\n"
-        f"{zingers.get_elimination_zinger(mention)}"
+    leg = entry["leg"]
+    bet = formatting.format_selection_button_label(
+        leg, leg["market"], leg["selection"], leg["line_value"], leg["price_american"]
     )
+    return (
+        f"🥊 {mention}'s parlay has been KNOCKED OUT!\n"
+        f"{formatting.format_leg(leg)}\n"
+        f"{zingers.get_knockout_zinger(mention, bet)}"
+    )
+
+
+async def _grade_pending_and_announce(bot, week_id: int) -> list[dict]:
+    """Grades whatever legs just went final and posts a one-time knockout
+    alert for each parlay's first losing leg - shared by poll_scores (which
+    catches most eliminations as they happen live) and grade_week_job (the
+    Sunday fallback / manual /admin grade-week path), so a knockout gets
+    announced no matter which one actually ends up grading it."""
+    graded_legs = grading.grade_pending_legs(bot.conn, week_id)
+    for entry in graded_legs:
+        if entry["result"] == "loss" and not entry["already_had_loss"]:
+            await bot.announce(_elimination_message(entry))
+    return graded_legs
 
 
 async def poll_scores(bot) -> None:
@@ -119,14 +144,7 @@ async def poll_scores(bot) -> None:
 
     # grade individual legs as their own game finishes, not just once the whole
     # week is done - lets people watch a parlay's legs resolve throughout the day
-    graded_legs = grading.grade_pending_legs(bot.conn, week["id"])
-
-    # a single losing leg dooms the whole parlay under the all-legs-must-win
-    # rule, so announce the moment that happens instead of waiting for every
-    # other leg on it to also finish - one alert per parlay, ever
-    for entry in graded_legs:
-        if entry["result"] == "loss" and not entry["already_had_loss"]:
-            await bot.announce(_elimination_message(entry))
+    graded_legs = await _grade_pending_and_announce(bot, week["id"])
 
     if graded_legs:
         await status_panel.refresh(bot)

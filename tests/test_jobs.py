@@ -226,9 +226,10 @@ async def test_poll_scores_announces_elimination_on_a_fresh_loss(conn):
     await jobs.poll_scores(bot)
 
     # this is the week's only game, so poll_scores also finalizes the week
-    # right after - the elimination alert should still be the first message
-    assert "eliminated" in bot.announcements[0]
+    # right after - the knockout alert should still be the first message
+    assert "KNOCKED OUT" in bot.announcements[0]
     assert "<@42>" in bot.announcements[0]
+    assert "Ohio State" in bot.announcements[0]  # names the specific losing pick
 
 
 async def test_poll_scores_does_not_announce_elimination_on_a_win(conn):
@@ -241,7 +242,7 @@ async def test_poll_scores_does_not_announce_elimination_on_a_win(conn):
 
     await jobs.poll_scores(bot)
 
-    assert not any("eliminated" in message for message in bot.announcements)
+    assert not any("KNOCKED OUT" in message for message in bot.announcements)
 
 
 async def test_grade_week_job_auto_syncs_next_week_once_finalized(conn):

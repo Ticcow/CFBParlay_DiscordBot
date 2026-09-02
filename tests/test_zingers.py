@@ -61,12 +61,15 @@ def test_get_flair_reaction_has_variety_across_categories():
     assert len(seen) > 5, "expected a mix of generic, emoji, and team-specific reactions"
 
 
-def test_get_elimination_zinger_embeds_the_mention_verbatim():
-    result = zingers.get_elimination_zinger("<@123>", choice_fn=lambda options: options[0])
-    assert result == zingers._ELIMINATION_ZINGERS[0].format(user="<@123>")
+def test_get_knockout_zinger_embeds_the_mention_and_bet_verbatim():
+    result = zingers.get_knockout_zinger(
+        "<@123>", "Texas -6.5 (-110)", choice_fn=lambda options: options[0]
+    )
+    assert result == zingers._KNOCKOUT_ZINGERS[0].format(user="<@123>", bet="Texas -6.5 (-110)")
     assert "<@123>" in result
+    assert "Texas -6.5 (-110)" in result
 
 
-def test_get_elimination_zinger_has_multiple_distinct_lines():
-    seen = {zingers.get_elimination_zinger("<@123>") for _ in range(30)}
+def test_get_knockout_zinger_has_multiple_distinct_lines():
+    seen = {zingers.get_knockout_zinger("<@123>", "Texas -6.5 (-110)") for _ in range(30)}
     assert len(seen) > 1
