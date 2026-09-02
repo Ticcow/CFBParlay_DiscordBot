@@ -111,6 +111,14 @@ class PanelActionsView(discord.ui.View):
 
         await admin.handle_refresh_panel(interaction)
 
+    @discord.ui.button(
+        label="🏈 Refresh Scores", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:refresh_scores", row=1
+    )
+    async def refresh_scores_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        from bot.commands import admin
+
+        await admin.handle_refresh_scores(interaction)
+
 
 def _add_season_leaderboard_field(bot, embed: discord.Embed) -> None:
     rows = repository.season_combined_leaderboard(bot.conn)

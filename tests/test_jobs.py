@@ -346,7 +346,39 @@ async def test_evening_digest_noop_before_any_game_has_started(conn):
     assert bot.announcements == []
 
 
-async def test_evening_digest_noop_with_nothing_active(conn):
+async def test_evening_digest_noop_with_no_submitted_parlays(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    past = FIXED_NOW.isoformat().replace("+00:00", "Z")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", past, "scheduled", None, None)]
+    )
+    repository.opt_in(conn, user_id=1, week_id=week_id)  # opted in, never actually submitted a parlay
+
+    await jobs.evening_digest_job(bot)
+
+    assert bot.announcements == []
+
+
+async def test_evening_digest_includes_knocked_out_parlays(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(
+        conn, week_id, user_id=1, home="Texas", away="Ohio State", selection="home"
+    )
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-28T00:00:00Z", "final", 10, 24)]
+    )
+    grading.grade_pending_legs(conn, week_id)  # busts the only leg, parlay isn't finalized/graded yet
+
+    await jobs.evening_digest_job(bot)
+
+    assert len(bot.announcements) == 1
+    assert "<@1>" in bot.announcements[0]
+    assert "KNOCKED OUT" in bot.announcements[0]
+
+
+async def test_evening_digest_includes_fully_graded_parlays(conn):
     bot = FakeBot(conn)
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     parlay_id, _ = _setup_submitted_parlay_with_one_leg(
@@ -355,11 +387,14 @@ async def test_evening_digest_noop_with_nothing_active(conn):
     repository.upsert_games(
         conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-28T00:00:00Z", "final", 10, 24)]
     )
-    grading.grade_pending_legs(conn, week_id)  # eliminates the only parlay
+    grading.grade_week(conn, week_id)  # fully finalizes the loss, not just the leg
 
     await jobs.evening_digest_job(bot)
 
-    assert bot.announcements == []
+    assert len(bot.announcements) == 1
+    assert "<@1>" in bot.announcements[0]
+    assert "[LOSS]" in bot.announcements[0]
+    assert "$0.00 payout" in bot.announcements[0]
 
 
 async def test_evening_digest_lists_active_parlays_with_payout_and_progress(conn):

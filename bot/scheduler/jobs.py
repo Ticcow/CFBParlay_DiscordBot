@@ -195,11 +195,11 @@ async def pregame_reminder_job(bot) -> None:
 
 
 async def evening_digest_job(bot) -> None:
-    """A once-a-day bulk roundup of every parlay still alive - who it belongs
-    to, its potential payout, and how many of its legs are already decided.
-    Silently skips if the week's games haven't started yet, or if there's
-    nothing left alive to report (no bets, or everyone's already been
-    eliminated) - no news is no message, not an empty one."""
+    """A once-a-day bulk roundup of every submitted parlay - alive, knocked
+    out, or fully graded - who it belongs to, its payout (potential or
+    actual), and how many of its legs are already decided. Silently skips if
+    the week's games haven't started yet, or if nobody has submitted
+    anything to report on - no news is no message, not an empty one."""
     week = repository.get_latest_week(bot.conn)
     if week is None:
         return
@@ -207,18 +207,30 @@ async def evening_digest_job(bot) -> None:
     if earliest is None or timeutils.parse_utc(earliest) > timeutils.utc_now():
         return  # nothing has kicked off yet this week
 
-    active = repository.list_active_parlays_for_week(bot.conn, week["id"])
-    if not active:
+    submitted = repository.list_submitted_parlays_for_week(bot.conn, week["id"])
+    if not submitted:
         return
 
     lines = [f"📋 **Parlay Update — Week {week['week_number']}**"]
-    for parlay in active:
+    for parlay in submitted:
         legs = repository.list_legs_with_games(bot.conn, parlay["id"])
         decided = sum(1 for leg in legs if leg["result"] != "pending")
-        lines.append(
-            f"<@{parlay['user_id']}> — ${parlay['wager_dollars']:.2f} → "
-            f"${parlay['potential_payout_dollars']:.2f} potential ({decided}/{len(legs)} legs decided)"
-        )
+        wager = f"${parlay['wager_dollars']:.2f}"
+        mention = f"<@{parlay['user_id']}>"
+
+        if parlay["status"] == "graded":
+            payout_text, status_label = formatting.format_payout_and_status(parlay)
+            marker = {"win": "🏆", "loss": "💀", "push": "➖"}[parlay["result"]]
+            lines.append(f"{marker} {mention} — {wager} wager → {payout_text} [{status_label}]")
+        elif any(leg["result"] == "loss" for leg in legs):
+            lines.append(
+                f"💀 {mention} — {wager} wager → KNOCKED OUT ({decided}/{len(legs)} legs decided)"
+            )
+        else:
+            potential = f"${parlay['potential_payout_dollars']:.2f}"
+            lines.append(
+                f"🏈 {mention} — {wager} wager → {potential} potential ({decided}/{len(legs)} legs decided)"
+            )
     await bot.announce("\n".join(lines))
 
 

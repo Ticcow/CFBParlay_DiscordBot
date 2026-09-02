@@ -170,6 +170,27 @@ async def handle_refresh_panel(interaction: discord.Interaction) -> None:
     await interaction.response.send_message("Panel refreshed.", ephemeral=True)
 
 
+async def handle_refresh_scores(interaction: discord.Interaction) -> None:
+    """Manually runs the same score-poll + grading pass poll_scores does on
+    its own schedule - lets someone pull the trigger immediately instead of
+    waiting for the next gameday check if a game just finished and the panel
+    hasn't caught up yet."""
+    bot = interaction.client
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    week = repository.get_latest_week(bot.conn)
+    if week is None:
+        await interaction.followup.send("No week is open yet.", ephemeral=True)
+        return
+
+    await scheduler_jobs.poll_scores(bot)
+
+    games = repository.list_games(bot.conn, week["id"])
+    final_count = sum(1 for g in games if g["status"] == "final")
+    await interaction.followup.send(
+        f"Scores refreshed - {final_count}/{len(games)} games final.", ephemeral=True
+    )
+
+
 async def handle_reset_week(interaction: discord.Interaction) -> None:
     if interaction.user.id not in RESET_WEEK_ALLOWED_USER_IDS:
         await interaction.response.send_message(
@@ -436,6 +457,13 @@ class AdminCog(commands.GroupCog, name="admin"):
     )
     async def refresh_panel_cmd(self, interaction: discord.Interaction):
         await handle_refresh_panel(interaction)
+
+    @app_commands.command(
+        name="refresh-scores",
+        description="Pull the latest scores from CollegeFootballData and grade anything that just finished",
+    )
+    async def refresh_scores_cmd(self, interaction: discord.Interaction):
+        await handle_refresh_scores(interaction)
 
     @app_commands.command(
         name="reset-week",

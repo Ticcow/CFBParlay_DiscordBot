@@ -596,24 +596,6 @@ def list_gradable_parlays(conn: sqlite3.Connection, week_id: int) -> list[sqlite
     ).fetchall()
 
 
-def list_active_parlays_for_week(conn: sqlite3.Connection, week_id: int) -> list[sqlite3.Row]:
-    """Parlays that are still alive - not yet fully graded, and with no leg
-    that's already lost (a single loss dooms the whole parlay, so it's no
-    longer "active" even before every leg is decided). Used for the evening
-    digest, which should only show parlays someone could still be rooting for."""
-    return conn.execute(
-        """
-        SELECT * FROM parlays
-        WHERE week_id = ? AND status IN ('submitted', 'locked')
-          AND NOT EXISTS (
-              SELECT 1 FROM parlay_legs WHERE parlay_legs.parlay_id = parlays.id AND parlay_legs.result = 'loss'
-          )
-        ORDER BY user_id, created_at
-        """,
-        (week_id,),
-    ).fetchall()
-
-
 def grade_leg_result(conn: sqlite3.Connection, leg_id: int, result: str) -> None:
     conn.execute(
         "UPDATE parlay_legs SET result = ?, graded_at = datetime('now') WHERE id = ?",
