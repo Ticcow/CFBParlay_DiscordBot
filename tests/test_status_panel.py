@@ -159,19 +159,45 @@ async def test_build_embed_bets_field_name_uses_plain_username_not_a_mention(con
 # --- cleanup_channel ---
 
 
+class FakeCleanupUser:
+    def __init__(self, user_id):
+        self.id = user_id
+
+
+class FakeCleanupEmbed:
+    def __init__(self, title):
+        self.title = title
+
+
+BOT_USER = FakeCleanupUser("bot")
+HUMAN_USER = FakeCleanupUser("human")
+
+
+def _panel_embed():
+    return FakeCleanupEmbed(status_panel.PANEL_EMBED_TITLE)
+
+
 class FakeCleanupMessage:
-    def __init__(self, message_id, created_at):
+    def __init__(self, message_id, created_at, author=BOT_USER, embeds=None):
         self.id = message_id
         self.created_at = created_at
+        self.author = author
+        self.embeds = embeds or []
         self.deleted = False
 
     async def delete(self):
         self.deleted = True
 
 
+class FakeCleanupGuild:
+    def __init__(self, me):
+        self.me = me
+
+
 class FakeCleanupChannel:
-    def __init__(self, messages):
+    def __init__(self, messages, guild=None):
         self.messages = messages  # newest-first, like real history()
+        self.guild = guild if guild is not None else FakeCleanupGuild(me=BOT_USER)
 
     async def history(self, limit=200):
         for m in self.messages[:limit]:
@@ -201,30 +227,58 @@ async def test_cleanup_channel_noop_when_unconfigured(monkeypatch):
     assert removed == 0
 
 
-async def test_cleanup_channel_deletes_only_messages_older_than_cutoff(panel_channel_configured):
+async def test_cleanup_channel_deletes_only_stale_panel_reposts_older_than_cutoff(panel_channel_configured):
     now = datetime.now(timezone.utc)
-    old_message = FakeCleanupMessage(1, now - timedelta(minutes=10))
-    fresh_message = FakeCleanupMessage(2, now - timedelta(minutes=1))
-    channel = FakeCleanupChannel([fresh_message, old_message])
+    old_panel = FakeCleanupMessage(1, now - timedelta(minutes=10), embeds=[_panel_embed()])
+    fresh_panel = FakeCleanupMessage(2, now - timedelta(minutes=1), embeds=[_panel_embed()])
+    channel = FakeCleanupChannel([fresh_panel, old_panel])
 
     removed = await status_panel.cleanup_channel(FakeCleanupBot(channel))
 
     assert removed == 1
-    assert old_message.deleted is True
-    assert fresh_message.deleted is False
+    assert old_panel.deleted is True
+    assert fresh_panel.deleted is False
 
 
 async def test_cleanup_channel_never_deletes_the_current_panel_even_if_old(panel_channel_configured):
     now = datetime.now(timezone.utc)
-    panel_message = FakeCleanupMessage(1, now - timedelta(minutes=30))
-    other_old_message = FakeCleanupMessage(2, now - timedelta(minutes=10))
-    channel = FakeCleanupChannel([other_old_message, panel_message])
+    panel_message = FakeCleanupMessage(1, now - timedelta(minutes=30), embeds=[_panel_embed()])
+    other_old_panel = FakeCleanupMessage(2, now - timedelta(minutes=10), embeds=[_panel_embed()])
+    channel = FakeCleanupChannel([other_old_panel, panel_message])
     status_panel._panels[555] = panel_message
 
     try:
         removed = await status_panel.cleanup_channel(FakeCleanupBot(channel))
         assert removed == 1
         assert panel_message.deleted is False
-        assert other_old_message.deleted is True
+        assert other_old_panel.deleted is True
     finally:
         status_panel._panels.pop(555, None)
+
+
+async def test_cleanup_channel_never_deletes_user_chat_even_if_old(panel_channel_configured):
+    now = datetime.now(timezone.utc)
+    banter = FakeCleanupMessage(1, now - timedelta(minutes=30), author=HUMAN_USER)
+    channel = FakeCleanupChannel([banter])
+
+    removed = await status_panel.cleanup_channel(FakeCleanupBot(channel))
+
+    assert removed == 0
+    assert banter.deleted is False
+
+
+async def test_cleanup_channel_never_deletes_the_bots_own_zingers_and_announcements(
+    panel_channel_configured,
+):
+    now = datetime.now(timezone.utc)
+    knockout_zinger = FakeCleanupMessage(1, now - timedelta(minutes=30))  # plain text, no embed
+    weekly_recap = FakeCleanupMessage(
+        2, now - timedelta(minutes=30), embeds=[FakeCleanupEmbed("Some other embed")]
+    )
+    channel = FakeCleanupChannel([knockout_zinger, weekly_recap])
+
+    removed = await status_panel.cleanup_channel(FakeCleanupBot(channel))
+
+    assert removed == 0
+    assert knockout_zinger.deleted is False
+    assert weekly_recap.deleted is False

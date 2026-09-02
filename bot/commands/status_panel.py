@@ -26,8 +26,8 @@ HOW_TO_PLAY = (
 # the channel). Recent history only - not a full-channel scan.
 _STALE_PANEL_SCAN_LIMIT = 50
 
-# cleanup_channel() deletes anything in the panel channel older than this that
-# isn't the current panel - the channel is meant to be nothing but the panel.
+# cleanup_channel() deletes the bot's own stale duplicate panel posts once
+# they're older than this - never user messages, never the bot's other posts.
 CLEANUP_AGE = timedelta(minutes=5)
 _CLEANUP_SCAN_LIMIT = 200
 
@@ -263,12 +263,13 @@ async def refresh(bot) -> None:
 
 
 async def cleanup_channel(bot) -> int:
-    """Deletes anything in the panel channel older than CLEANUP_AGE that isn't
-    the current panel message - the channel is meant to show nothing else.
-    Requires the bot to have Manage Messages there (Send Messages alone only
-    lets a bot delete its own messages, not other members'); if that's missing,
-    logs once and stops rather than retrying every message. Returns how many
-    messages were removed."""
+    """Deletes stale duplicate panel posts the bot left behind (e.g. a
+    restart landing before _panels had a chance to re-sync) that are older
+    than CLEANUP_AGE. Never touches anything else - user chat/banter and the
+    bot's own zingers, digests, and other announcements all stay put, so the
+    channel doesn't have to be panel-only for this to be safe. Deleting only
+    the bot's own messages needs nothing beyond the base Send Messages
+    permission. Returns how many messages were removed."""
     if not settings.admin_log_channel_id:
         return 0
     channel_id = settings.admin_log_channel_id
@@ -279,11 +280,16 @@ async def cleanup_channel(bot) -> int:
         logger.warning("Failed to fetch panel channel %s", channel_id)
         return 0
 
+    me = getattr(getattr(channel, "guild", None), "me", None)
     current_panel = _panels.get(channel_id)
     cutoff = discord.utils.utcnow() - CLEANUP_AGE
     removed = 0
     try:
         async for message in channel.history(limit=_CLEANUP_SCAN_LIMIT):
+            if me is not None and message.author != me:
+                continue  # never touch a message this bot didn't post
+            if not message.embeds or message.embeds[0].title != PANEL_EMBED_TITLE:
+                continue  # only stale panel reposts - zingers/digests/etc. stay
             if current_panel is not None and message.id == current_panel.id:
                 continue
             if message.created_at > cutoff:
@@ -291,13 +297,6 @@ async def cleanup_channel(bot) -> int:
             try:
                 await message.delete()
                 removed += 1
-            except discord.Forbidden:
-                logger.warning(
-                    "Missing Manage Messages permission in channel %s - can't clean it up. "
-                    "Grant it in Server Settings > Roles, or as a channel-specific override.",
-                    channel_id,
-                )
-                return removed
             except discord.HTTPException:
                 pass
     except discord.HTTPException:

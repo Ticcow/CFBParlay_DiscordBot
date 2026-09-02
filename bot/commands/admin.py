@@ -474,7 +474,7 @@ class AdminCog(commands.GroupCog, name="admin"):
 
     @app_commands.command(
         name="cleanup-channel",
-        description="Manually delete anything older than 5 min in the panel channel except the panel",
+        description="Manually delete stale duplicate panel posts older than 5 min (never chat or other bot posts)",
     )
     async def cleanup_channel_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
