@@ -4,6 +4,11 @@ import httpx
 
 BASE_URL = "https://api.collegefootballdata.com"
 
+# httpx's default (5s) is too tight for CFBD from the Pi - it's gotten hit on
+# gameday when their API is under heavier load, failing an otherwise-fine
+# scheduled job outright instead of just taking a bit longer.
+_TIMEOUT = httpx.Timeout(20.0)
+
 
 @dataclass
 class CfbdGame:
@@ -100,7 +105,7 @@ class CfbdClient:
     async def get_games(
         self, year: int, week: int, season_type: str = "regular"
     ) -> list[CfbdGame]:
-        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers) as client:
+        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers, timeout=_TIMEOUT) as client:
             response = await client.get(
                 "/games",
                 # no "division" param here - CFBD's /games endpoint ignores it and
@@ -114,7 +119,7 @@ class CfbdClient:
             return [_parse_game(raw) for raw in response.json() if _involves_fbs_team(raw)]
 
     async def get_calendar(self, year: int) -> list[CalendarWeek]:
-        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers) as client:
+        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers, timeout=_TIMEOUT) as client:
             response = await client.get("/calendar", params={"year": year})
             response.raise_for_status()
             if self._log_usage:
@@ -124,7 +129,7 @@ class CfbdClient:
     async def get_ap_top25(
         self, year: int, week: int, season_type: str = "regular"
     ) -> list[RankedTeam]:
-        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers) as client:
+        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers, timeout=_TIMEOUT) as client:
             response = await client.get(
                 "/rankings", params={"year": year, "week": week, "seasonType": season_type}
             )
@@ -134,7 +139,7 @@ class CfbdClient:
             return _parse_teams_top25(response.json())
 
     async def get_teams(self, year: int) -> list[TeamInfo]:
-        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers) as client:
+        async with httpx.AsyncClient(base_url=BASE_URL, headers=self._headers, timeout=_TIMEOUT) as client:
             response = await client.get("/teams/fbs", params={"year": year})
             response.raise_for_status()
             if self._log_usage:

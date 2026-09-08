@@ -8,6 +8,9 @@ MARKETS = "spreads,totals,h2h"
 REGIONS = "us"
 CREDITS_PER_FETCH = 3  # markets(3) x regions(1), per The Odds API's cost model
 
+# httpx's default (5s) is too tight from the Pi under load - see cfbd_client.
+_TIMEOUT = httpx.Timeout(20.0)
+
 
 @dataclass
 class OddsEvent:
@@ -93,7 +96,7 @@ class OddsClient:
         self._log_usage = log_usage
 
     async def get_ncaaf_odds(self) -> list[OddsEvent]:
-        async with httpx.AsyncClient(base_url=BASE_URL) as client:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=_TIMEOUT) as client:
             response = await client.get(
                 f"/v4/sports/{SPORT_KEY}/odds",
                 params={

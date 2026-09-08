@@ -2,6 +2,7 @@ import random
 from datetime import timedelta
 
 import discord
+import httpx
 from discord import app_commands
 from discord.ext import commands
 
@@ -182,7 +183,15 @@ async def handle_refresh_scores(interaction: discord.Interaction) -> None:
         await interaction.followup.send("No week is open yet.", ephemeral=True)
         return
 
-    await scheduler_jobs.poll_scores(bot)
+    try:
+        await scheduler_jobs.poll_scores(bot)
+    except httpx.HTTPError:
+        await interaction.followup.send(
+            "CollegeFootballData's API didn't respond in time - it's probably just "
+            "under heavy load on gameday. Try again in a minute.",
+            ephemeral=True,
+        )
+        return
 
     games = repository.list_games(bot.conn, week["id"])
     final_count = sum(1 for g in games if g["status"] == "final")
