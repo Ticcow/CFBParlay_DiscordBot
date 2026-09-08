@@ -96,6 +96,14 @@ class PanelActionsView(discord.ui.View):
         await flair.handle_open_flair_picker(interaction)
 
     @discord.ui.button(
+        label="📋 Parlay Details", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:parlay_details", row=0
+    )
+    async def parlay_details_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        from bot.commands import leaderboard
+
+        await leaderboard.handle_show_parlay_details(interaction)
+
+    @discord.ui.button(
         label="🔄 Sync All", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:sync_all", row=1
     )
     async def sync_all_button(self, interaction: discord.Interaction, _button: discord.ui.Button):

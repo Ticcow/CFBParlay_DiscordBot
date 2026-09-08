@@ -8,6 +8,51 @@ from bot.parlays import formatting, repository
 MAX_PARLAY_FIELDS = 20
 
 
+async def handle_show_parlay_details(
+    interaction: discord.Interaction, user: discord.User | None = None
+) -> None:
+    """Full per-leg breakdown (teams, market, line, odds) plus wager and
+    payout for every submitted parlay this week - the detail view behind
+    both /parlays and the panel's Parlay Details button, since the panel
+    itself only shows the compact per-bettor marker summary."""
+    bot = interaction.client
+    week = repository.get_latest_week(bot.conn)
+    if week is None:
+        await interaction.response.send_message("No week is open yet.", ephemeral=True)
+        return
+
+    parlays = [
+        p
+        for p in repository.list_submitted_parlays_for_week(bot.conn, week["id"])
+        if user is None or p["user_id"] == user.id
+    ]
+    if not parlays:
+        await interaction.response.send_message("No submitted parlays yet.", ephemeral=True)
+        return
+
+    embed = discord.Embed(title=f"Week {week['week_number']} Parlays")
+    for parlay in parlays[:MAX_PARLAY_FIELDS]:
+        legs = repository.list_legs_with_games(bot.conn, parlay["id"])
+        leg_text = "\n".join(formatting.format_leg(leg) for leg in legs)
+        wager = f"${parlay['wager_dollars']:.2f}" if parlay["wager_dollars"] is not None else "-"
+        payout_text, status_label = formatting.format_payout_and_status(parlay)
+        username = await resolve_username(bot, parlay["user_id"])
+        embed.add_field(
+            name=f"{username} — #{parlay['id']} [{status_label}] "
+            f"{wager} wager → {payout_text}",
+            value=leg_text[:1024],
+            inline=False,
+        )
+    if len(parlays) > MAX_PARLAY_FIELDS:
+        embed.add_field(
+            name="...",
+            value=f"+{len(parlays) - MAX_PARLAY_FIELDS} more parlay(s) not shown",
+            inline=False,
+        )
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 class LeaderboardCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -15,43 +60,7 @@ class LeaderboardCog(commands.Cog):
     @app_commands.command(name="parlays", description="View submitted parlays for this week")
     @app_commands.describe(user="Only show this user's parlays")
     async def parlays(self, interaction: discord.Interaction, user: discord.User | None = None):
-        week = repository.get_latest_week(self.bot.conn)
-        if week is None:
-            await interaction.response.send_message("No week is open yet.", ephemeral=True)
-            return
-
-        parlays = [
-            p
-            for p in repository.list_submitted_parlays_for_week(self.bot.conn, week["id"])
-            if user is None or p["user_id"] == user.id
-        ]
-        if not parlays:
-            await interaction.response.send_message("No submitted parlays yet.", ephemeral=True)
-            return
-
-        embed = discord.Embed(title=f"Week {week['week_number']} Parlays")
-        for parlay in parlays[:MAX_PARLAY_FIELDS]:
-            legs = repository.list_legs_with_games(self.bot.conn, parlay["id"])
-            leg_text = "\n".join(formatting.format_leg(leg) for leg in legs)
-            wager = (
-                f"${parlay['wager_dollars']:.2f}" if parlay["wager_dollars"] is not None else "-"
-            )
-            payout_text, status_label = formatting.format_payout_and_status(parlay)
-            username = await resolve_username(self.bot, parlay["user_id"])
-            embed.add_field(
-                name=f"{username} — #{parlay['id']} [{status_label}] "
-                f"{wager} wager → {payout_text}",
-                value=leg_text[:1024],
-                inline=False,
-            )
-        if len(parlays) > MAX_PARLAY_FIELDS:
-            embed.add_field(
-                name="...",
-                value=f"+{len(parlays) - MAX_PARLAY_FIELDS} more parlay(s) not shown",
-                inline=False,
-            )
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await handle_show_parlay_details(interaction, user)
 
     @app_commands.command(name="leaderboard", description="View the weekly or season leaderboard")
     @app_commands.describe(scope="Which leaderboard to show")
