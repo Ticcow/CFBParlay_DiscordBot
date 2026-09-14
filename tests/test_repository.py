@@ -832,6 +832,18 @@ def test_delete_week_cascade_removes_everything_under_the_week(conn):
     assert rankings == []
 
 
+def test_delete_week_cascade_removes_finalized_marker(conn):
+    # week_finalized has a foreign key on weeks.id with no ON DELETE CASCADE -
+    # deleting the week without clearing this first would raise a foreign key
+    # constraint error under the connection's PRAGMA foreign_keys=ON
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.mark_week_finalized(conn, week_id)
+
+    repository.delete_week_cascade(conn, week_id)  # should not raise
+
+    assert repository.get_week(conn, week_id) is None
+
+
 def test_reset_week_bets_clears_parlays_and_participants_but_keeps_the_schedule(conn):
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     repository.upsert_games(conn, week_id, [make_game()])
@@ -857,6 +869,18 @@ def test_reset_week_bets_clears_parlays_and_participants_but_keeps_the_schedule(
     assert repository.get_latest_odds_snapshot(conn, game["id"]) is not None
     rankings = conn.execute("SELECT * FROM rankings WHERE week_id = ?", (week_id,)).fetchall()
     assert len(rankings) == 1
+
+
+def test_reset_week_bets_clears_finalized_marker_so_polling_resumes(conn):
+    # resetting an already-wrapped-up week means fresh parlays are coming -
+    # they still need to get polled and graded, not skipped as "settled"
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.mark_week_finalized(conn, week_id)
+    assert repository.is_week_finalized(conn, week_id) is True
+
+    repository.reset_week_bets(conn, week_id)
+
+    assert repository.is_week_finalized(conn, week_id) is False
 
 
 # --- bot_state key/value store ---

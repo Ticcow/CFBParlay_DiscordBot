@@ -75,6 +75,8 @@ async def grade_week_job(bot) -> dict:
     week = repository.get_latest_week(bot.conn)
     if week is None:
         return {"graded": [], "skipped_incomplete": []}
+    if repository.is_week_finalized(bot.conn, week["id"]):
+        return {"graded": [], "skipped_incomplete": []}  # already wrapped up
 
     # grade_week only finalizes a parlay once every one of its legs is final,
     # so a leg that just went final on its own (e.g. this job running as the
@@ -138,6 +140,12 @@ async def _grade_pending_and_announce(bot, week_id: int) -> list[dict]:
 async def poll_scores(bot) -> None:
     week = repository.get_latest_week(bot.conn)
     if week is None:
+        return
+    if repository.is_week_finalized(bot.conn, week["id"]):
+        # nothing left to grade or announce until a new week opens - skip the
+        # CFBD call entirely rather than re-polling a settled week on every
+        # gameday run (and Sunday's daily catch-all) until Tuesday's sync
+        # finally rolls the panel over to whatever's next
         return
     games = await bot.cfbd.get_games(week["season_year"], week["week_number"], week["season_type"])
     repository.upsert_games(bot.conn, week["id"], games)

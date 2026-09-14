@@ -100,3 +100,32 @@ def test_finalize_week_splits_a_tie(conn):
 def test_finalize_week_no_participants_returns_empty(conn):
     week_id = repository.upsert_week(conn, 2026, 1, "regular")
     assert standings.finalize_week(conn, week_id) == []
+
+
+def test_finalize_week_only_returns_winners_once(conn):
+    # a settled week keeps getting polled/graded again (poll_scores runs
+    # several times a day, plus the Sunday fallback) until a new week opens -
+    # finalize_week must not re-announce winners on every one of those calls
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    game = _sync_game(conn, week_id, 1, "Texas", "Ohio State", "final", 24, 17)
+    snapshot = repository.get_latest_odds_snapshot(conn, game["id"])
+    participant = repository.opt_in(conn, user_id=1, week_id=week_id)
+    parlay_id = repository.start_parlay(conn, 1, week_id)
+    repository.add_leg(conn, parlay_id, game["id"], snapshot["id"], "moneyline", "home", None, -150)
+    repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 166.67)
+    grading.grade_week(conn, week_id)
+
+    first = standings.finalize_week(conn, week_id)
+    second = standings.finalize_week(conn, week_id)
+
+    assert first == [1]
+    assert second == []
+    assert repository.is_week_finalized(conn, week_id) is True
+
+
+def test_finalize_week_marks_finalized_even_with_no_participants(conn):
+    # nobody opted in, so there are no winners to announce, but there's still
+    # nothing left to poll for - should still stop future polling
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    standings.finalize_week(conn, week_id)
+    assert repository.is_week_finalized(conn, week_id) is True

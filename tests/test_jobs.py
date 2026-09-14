@@ -20,11 +20,13 @@ class FakeCfbdClient:
         self.calendar = []
         self.games = []
         self.ranked_teams = []
+        self.get_games_calls = 0
 
     async def get_calendar(self, year):
         return self.calendar
 
     async def get_games(self, year, week, season_type):
+        self.get_games_calls += 1
         return self.games
 
     async def get_ap_top25(self, year, week, season_type):
@@ -243,6 +245,31 @@ async def test_poll_scores_does_not_announce_elimination_on_a_win(conn):
     await jobs.poll_scores(bot)
 
     assert not any("KNOCKED OUT" in message for message in bot.announcements)
+
+
+async def test_poll_scores_stops_polling_and_reannouncing_once_week_is_finalized(conn):
+    # once a week's last game finishes and grading wraps it up, poll_scores
+    # keeps getting called (gameday runs, the daily 8am catch-all) until a new
+    # week opens - it should go quiet immediately instead of re-hitting CFBD
+    # and re-posting "week is final" on every one of those later calls
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(
+        conn, week_id, user_id=42, home="Texas", away="Ohio State", selection="home"
+    )
+    bot.cfbd.games = [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 24, 17)]
+    bot.cfbd.calendar = []  # no next week published yet - stays on week 1
+
+    await jobs.poll_scores(bot)
+    assert bot.cfbd.get_games_calls == 1
+    assert any("is final" in m for m in bot.announcements)
+    announcements_after_first_run = len(bot.announcements)
+
+    await jobs.poll_scores(bot)
+    await jobs.poll_scores(bot)
+
+    assert bot.cfbd.get_games_calls == 1  # never polled CFBD again
+    assert len(bot.announcements) == announcements_after_first_run  # no repeat "is final"
 
 
 async def test_grade_week_job_auto_syncs_next_week_once_finalized(conn):

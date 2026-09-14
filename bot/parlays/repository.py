@@ -679,6 +679,23 @@ def mark_weekly_winners(conn: sqlite3.Connection, week_id: int) -> list[int]:
     return [winner["user_id"] for winner in winners]
 
 
+def is_week_finalized(conn: sqlite3.Connection, week_id: int) -> bool:
+    """Whether finalize_week has already fully wrapped up this week - once
+    true, there's nothing left to grade or announce until a new week opens,
+    so callers can skip re-polling/re-announcing entirely."""
+    row = conn.execute(
+        "SELECT 1 FROM week_finalized WHERE week_id = ?", (week_id,)
+    ).fetchone()
+    return row is not None
+
+
+def mark_week_finalized(conn: sqlite3.Connection, week_id: int) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO week_finalized (week_id) VALUES (?)", (week_id,)
+    )
+    conn.commit()
+
+
 def list_week_standings(conn: sqlite3.Connection, week_id: int) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM week_participants WHERE week_id = ? ORDER BY current_balance DESC",
@@ -844,6 +861,7 @@ def delete_week_cascade(conn: sqlite3.Connection, week_id: int) -> int:
     ).fetchone()[0]
     conn.execute("DELETE FROM games WHERE week_id = ?", (week_id,))
     conn.execute("DELETE FROM rankings WHERE week_id = ?", (week_id,))
+    conn.execute("DELETE FROM week_finalized WHERE week_id = ?", (week_id,))
     conn.execute("DELETE FROM weeks WHERE id = ?", (week_id,))
     conn.commit()
     return game_count
@@ -852,7 +870,10 @@ def delete_week_cascade(conn: sqlite3.Connection, week_id: int) -> int:
 def reset_week_bets(conn: sqlite3.Connection, week_id: int) -> dict:
     """Clears everyone's opt-ins and parlays for a week - a do-over on the
     betting side only. Leaves the week's games, odds, and rankings untouched,
-    so nobody has to wait on a re-sync before betting again."""
+    so nobody has to wait on a re-sync before betting again. Also clears any
+    is_week_finalized marker - if this ran on a week that had already wrapped
+    up, fresh parlays submitted after the reset still need to get polled and
+    graded, not silently skipped as "already settled"."""
     parlay_count = conn.execute(
         "SELECT COUNT(*) FROM parlays WHERE week_id = ?", (week_id,)
     ).fetchone()[0]
@@ -865,6 +886,7 @@ def reset_week_bets(conn: sqlite3.Connection, week_id: int) -> dict:
     )
     conn.execute("DELETE FROM parlays WHERE week_id = ?", (week_id,))
     conn.execute("DELETE FROM week_participants WHERE week_id = ?", (week_id,))
+    conn.execute("DELETE FROM week_finalized WHERE week_id = ?", (week_id,))
     conn.commit()
     return {"parlays_removed": parlay_count, "participants_removed": participant_count}
 
