@@ -1,7 +1,9 @@
 import logging
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import discord
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -100,13 +102,17 @@ async def grade_week_job(bot) -> dict:
         await status_panel.refresh(bot)
 
     if winners:
-        # the week just wrapped up - roll straight into whatever CFBD has
-        # lined up next instead of waiting for Tuesday's scheduled sync, so
-        # opting in for next week (and its own "Week N is open" announcement)
-        # is available right away. A no-op if CFBD hasn't published next
-        # week's games yet - sync_week_games handles that gracefully, and
-        # does its own extra panel refresh on top if it does find one.
-        await sync_week_games(bot)
+        # the week just wrapped up - try to roll straight into whatever CFBD
+        # has lined up next instead of waiting for Tuesday's scheduled sync.
+        # Only best-effort: CFBD's calendar usually still counts the finished
+        # week as current on Sunday, so this often just re-syncs it, and the
+        # Tuesday cron opens the next week either way. A CFBD hiccup here
+        # shouldn't turn an already-graded, already-announced week into a
+        # "job failed" alert.
+        try:
+            await sync_week_games(bot)
+        except httpx.HTTPError:
+            logger.exception("Auto-advance after finalizing week %s failed", week["week_number"])
 
     return result
 
@@ -202,14 +208,26 @@ async def pregame_reminder_job(bot) -> None:
         )
 
 
+def _eastern_date(moment: datetime) -> date:
+    return moment.astimezone(EASTERN).date()
+
+
 async def evening_digest_job(bot) -> None:
     """A once-a-day bulk roundup of every submitted parlay - alive, knocked
     out, or fully graded - who it belongs to, its payout (potential or
     actual), and how many of its legs are already decided. Silently skips if
     the week's games haven't started yet, or if nobody has submitted
-    anything to report on - no news is no message, not an empty one."""
+    anything to report on - no news is no message, not an empty one.
+
+    Once the week is finalized, it posts one last recap on the day that
+    happened (normally Sunday) and then goes quiet - the finished week stays
+    "current" until Tuesday's sync opens the next one, and repeating the
+    same final results every evening until then is just noise."""
     week = repository.get_latest_week(bot.conn)
     if week is None:
+        return
+    finalized_at = repository.get_week_finalized_at(bot.conn, week["id"])
+    if finalized_at is not None and _eastern_date(finalized_at) < _eastern_date(timeutils.utc_now()):
         return
     earliest = repository.get_earliest_kickoff(bot.conn, week["id"])
     if earliest is None or timeutils.parse_utc(earliest) > timeutils.utc_now():
@@ -260,10 +278,16 @@ def _guarded(bot, name: str, job):
     async def run():
         try:
             await job(bot)
-        except Exception:
+        except Exception as error:
             logger.exception("Scheduled job %s failed", name)
+            # the exception type, not its message: the Pi's journal rotates
+            # within days, so the alert is often the only lasting record of
+            # what went wrong, but httpx messages include the full request URL
+            # and the Odds API key rides in that URL's query string
             try:
-                await bot.announce(f"⚠️ Scheduled job `{name}` failed - check the logs.")
+                await bot.announce(
+                    f"⚠️ Scheduled job `{name}` failed ({type(error).__name__}) - check the logs."
+                )
             except Exception:
                 logger.exception("Also failed to post the failure alert for %s", name)
 

@@ -871,6 +871,18 @@ def test_reset_week_bets_clears_parlays_and_participants_but_keeps_the_schedule(
     assert len(rankings) == 1
 
 
+def test_get_week_finalized_at_reads_rows_written_by_the_sqlite_default(conn):
+    # rows finalized before mark_week_finalized passed its own timestamp were
+    # stamped by the column's datetime('now') default - they must still parse
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    conn.execute("INSERT INTO week_finalized (week_id) VALUES (?)", (week_id,))
+
+    finalized_at = repository.get_week_finalized_at(conn, week_id)
+
+    assert finalized_at is not None
+    assert finalized_at.utcoffset().total_seconds() == 0
+
+
 def test_reset_week_bets_clears_finalized_marker_so_polling_resumes(conn):
     # resetting an already-wrapped-up week means fresh parlays are coming -
     # they still need to get polled and graded, not skipped as "settled"

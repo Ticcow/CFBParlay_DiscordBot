@@ -2,6 +2,7 @@ import re
 import sqlite3
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from bot.integrations import team_aliases
 from bot.integrations.cfbd_client import CfbdGame, RankedTeam, TeamInfo
@@ -679,19 +680,31 @@ def mark_weekly_winners(conn: sqlite3.Connection, week_id: int) -> list[int]:
     return [winner["user_id"] for winner in winners]
 
 
+_FINALIZED_AT_FORMAT = "%Y-%m-%d %H:%M:%S"  # UTC, same shape as SQLite's datetime('now')
+
+
+def get_week_finalized_at(conn: sqlite3.Connection, week_id: int) -> datetime | None:
+    """When finalize_week wrapped this week up (timezone-aware UTC), or None
+    if it hasn't yet."""
+    row = conn.execute(
+        "SELECT finalized_at FROM week_finalized WHERE week_id = ?", (week_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return datetime.strptime(row["finalized_at"], _FINALIZED_AT_FORMAT).replace(tzinfo=timezone.utc)
+
+
 def is_week_finalized(conn: sqlite3.Connection, week_id: int) -> bool:
     """Whether finalize_week has already fully wrapped up this week - once
     true, there's nothing left to grade or announce until a new week opens,
     so callers can skip re-polling/re-announcing entirely."""
-    row = conn.execute(
-        "SELECT 1 FROM week_finalized WHERE week_id = ?", (week_id,)
-    ).fetchone()
-    return row is not None
+    return get_week_finalized_at(conn, week_id) is not None
 
 
 def mark_week_finalized(conn: sqlite3.Connection, week_id: int) -> None:
     conn.execute(
-        "INSERT OR IGNORE INTO week_finalized (week_id) VALUES (?)", (week_id,)
+        "INSERT OR IGNORE INTO week_finalized (week_id, finalized_at) VALUES (?, ?)",
+        (week_id, timeutils.utc_now().strftime(_FINALIZED_AT_FORMAT)),
     )
     conn.commit()
 

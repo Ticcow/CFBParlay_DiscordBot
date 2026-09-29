@@ -1,10 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
 
 from bot.integrations.cfbd_client import CalendarWeek, CfbdGame, RankedTeam
 from bot.integrations.odds_client import OddsEvent
-from bot.parlays import grading, repository, timeutils
+from bot.parlays import grading, repository, standings, timeutils
 from bot.scheduler import jobs
 
 FIXED_NOW = datetime(2026, 8, 28, tzinfo=timezone.utc)
@@ -21,8 +22,11 @@ class FakeCfbdClient:
         self.games = []
         self.ranked_teams = []
         self.get_games_calls = 0
+        self.calendar_error = None
 
     async def get_calendar(self, year):
+        if self.calendar_error is not None:
+            raise self.calendar_error
         return self.calendar
 
     async def get_games(self, year, week, season_type):
@@ -351,6 +355,26 @@ async def test_grade_week_job_finalizes_without_erroring_at_end_of_season(conn):
     assert repository.get_latest_week(conn)["week_number"] == 1  # nothing to advance into
 
 
+async def test_grade_week_job_cfbd_hiccup_during_auto_advance_is_not_a_job_failure(conn):
+    # the week is already graded and announced by the time it tries to advance -
+    # a CFBD timeout there shouldn't post a "job failed" alert on top of that
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(
+        conn, week_id, user_id=42, home="Texas", away="Ohio State", selection="home"
+    )
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 24, 17)]
+    )
+    bot.cfbd.calendar_error = httpx.ReadTimeout("timed out")
+
+    await jobs._guarded(bot, "poll_scores_daily", jobs.grade_week_job)()
+
+    assert any("is final" in m for m in bot.announcements)
+    assert not any("failed" in m for m in bot.announcements)
+    assert repository.is_week_finalized(conn, week_id) is True
+
+
 async def test_evening_digest_noop_with_no_week(conn):
     bot = FakeBot(conn)
     await jobs.evening_digest_job(bot)
@@ -448,6 +472,45 @@ async def test_evening_digest_lists_active_parlays_with_payout_and_progress(conn
     assert "1/1 legs decided" in bot.announcements[0]
 
 
+def _finalize_single_parlay_week_at(conn, monkeypatch, finalized_at):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(
+        conn, week_id, user_id=1, home="Texas", away="Ohio State", selection="home"
+    )
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-28T00:00:00Z", "final", 24, 17)]
+    )
+    monkeypatch.setattr(timeutils, "utc_now", lambda: finalized_at)
+    grading.grade_week(conn, week_id)
+    assert standings.finalize_week(conn, week_id) == [1]
+
+
+async def test_evening_digest_posts_final_recap_on_the_day_the_week_finalized(conn, monkeypatch):
+    sunday_8am_et = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+    _finalize_single_parlay_week_at(conn, monkeypatch, sunday_8am_et)
+    bot = FakeBot(conn)
+
+    monkeypatch.setattr(timeutils, "utc_now", lambda: sunday_8am_et + timedelta(hours=11))  # 7pm ET
+    await jobs.evening_digest_job(bot)
+
+    assert len(bot.announcements) == 1
+    assert "[WIN]" in bot.announcements[0]
+
+
+async def test_evening_digest_goes_quiet_the_day_after_the_week_finalized(conn, monkeypatch):
+    # 11pm ET Sunday and 7pm ET Monday share a UTC date (both Aug 31), so this
+    # only passes if "the day it finalized" is judged in Eastern time
+    sunday_11pm_et = datetime(2026, 8, 31, 3, 0, tzinfo=timezone.utc)
+    _finalize_single_parlay_week_at(conn, monkeypatch, sunday_11pm_et)
+    bot = FakeBot(conn)
+
+    monday_7pm_et = datetime(2026, 8, 31, 23, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(timeutils, "utc_now", lambda: monday_7pm_et)
+    await jobs.evening_digest_job(bot)
+
+    assert bot.announcements == []
+
+
 async def test_api_usage_report_job_noop_with_no_usage(conn):
     bot = FakeBot(conn)
     await jobs.api_usage_report_job(bot)
@@ -476,6 +539,10 @@ async def test_guarded_job_posts_failure_alert_instead_of_raising(conn):
 
     assert len(bot.announcements) == 1
     assert "failing_job" in bot.announcements[0]
+    assert "RuntimeError" in bot.announcements[0]
+    # never the message - an httpx error's message carries the request URL,
+    # which for the Odds API includes the API key
+    assert "boom" not in bot.announcements[0]
 
 
 def _setup_week_kicking_off_in(conn, hours_from_now):
