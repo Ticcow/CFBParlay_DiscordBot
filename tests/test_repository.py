@@ -1013,3 +1013,16 @@ def test_reminder_sent_tracking_is_per_week_and_threshold(conn):
     assert repository.has_sent_reminder(conn, week_id, 6) is False
 
     repository.mark_reminder_sent(conn, week_id, 24)  # marking twice doesn't error
+
+
+def test_custom_roasts_add_list_dedupe_and_remove(conn):
+    roast_id = repository.add_custom_roast(conn, "generic", "{user} is a clown", added_by=7)
+    assert roast_id is not None
+    assert repository.add_custom_roast(conn, "generic", "{user} is a clown", added_by=7) is None
+    repository.add_custom_roast(conn, "knockout", "{user} lost on {bet}", added_by=7)
+
+    assert [r["template"] for r in repository.list_custom_roasts(conn, "generic")] == ["{user} is a clown"]
+    assert len(repository.list_custom_roasts(conn)) == 2
+    assert repository.remove_custom_roast(conn, roast_id) is True
+    assert repository.remove_custom_roast(conn, roast_id) is False
+    assert repository.list_custom_roasts(conn, "generic") == []

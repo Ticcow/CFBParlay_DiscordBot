@@ -1,5 +1,6 @@
 import random
-from collections.abc import Collection
+import string
+from collections.abc import Collection, Mapping, Sequence
 
 _ZINGERS: dict[str, list[str]] = {
     "purdue": [
@@ -115,13 +116,16 @@ _KNOCKOUT_ZINGERS = [
 ]
 
 
-def get_knockout_zinger(mention: str, bet_description: str, choice_fn=random.choice) -> str:
+def get_knockout_zinger(
+    mention: str, bet_description: str, custom: Sequence[str] = (), choice_fn=random.choice
+) -> str:
     """A one-liner roasting the specific pick that just busted a parlay -
     mention should be a Discord mention string like "<@123>" so it renders
     inline as a real ping rather than plain text, and bet_description a short
     pick summary like "Texas -6.5 (-110)" (see
-    formatting.format_selection_button_label)."""
-    return choice_fn(_KNOCKOUT_ZINGERS).format(user=mention, bet=bet_description)
+    formatting.format_selection_button_label). `custom` adds knockout lines
+    from /admin add-roast."""
+    return choice_fn(_KNOCKOUT_ZINGERS + list(custom)).format(user=mention, bet=bet_description)
 
 
 _TRASH_TALK_BUSTED_BET = [
@@ -240,25 +244,70 @@ def get_trash_talk(
     is_last: bool,
     is_leader: bool,
     recent: Collection[str] = (),
+    custom: Mapping[str, Sequence[str]] = {},
     choice_fn=random.choice,
 ) -> tuple[str, str]:
     """An unprompted jab at one player, drawn from whichever of their week's
     sore spots apply (a busted bet named outright, last place, first place,
     opted in but never bet) plus a generic pool, so it reads like it was
     written about them rather than at a random name. Skips any template in
-    `recent` unless a category has nothing else left. Returns (message,
+    `recent` unless a category has nothing else left. `custom` adds lines
+    from /admin add-roast, keyed by category name. Returns (message,
     template) so the caller can remember which line it used."""
-    categories = [_TRASH_TALK_GENERIC]
+
+    def pool(category: str) -> list[str]:
+        return ROAST_CATEGORIES[category][0] + list(custom.get(category, ()))
+
+    categories = [pool("generic")]
     if busted_bets:
-        categories.append(_TRASH_TALK_BUSTED_BET)
+        categories.append(pool("busted_bet"))
     if not has_bets:
-        categories.append(_TRASH_TALK_NO_BETS)
+        categories.append(pool("no_bets"))
     if is_last:
-        categories.append(_TRASH_TALK_LAST_PLACE)
+        categories.append(pool("last_place"))
     if is_leader:
-        categories.append(_TRASH_TALK_LEADER)
+        categories.append(pool("leader"))
     category = choice_fn(categories)
     fresh = [template for template in category if template not in recent]
     template = choice_fn(fresh or category)
     bet = choice_fn(busted_bets) if busted_bets else ""
     return template.format(user=mention, balance=balance_text, bet=bet), template
+
+
+# Every category /admin add-roast can add to: (built-in pool, label shown in
+# Discord, placeholders a line in it may use). Knockout lines only ever get
+# {user} and {bet}; the daily-roast categories get {balance} too, and {bet}
+# only exists when the target actually has a busted bet.
+ROAST_CATEGORIES: dict[str, tuple[list[str], str, frozenset[str]]] = {
+    "generic": (_TRASH_TALK_GENERIC, "Any time", frozenset({"user", "balance"})),
+    "busted_bet": (_TRASH_TALK_BUSTED_BET, "Has a busted bet", frozenset({"user", "balance", "bet"})),
+    "no_bets": (_TRASH_TALK_NO_BETS, "Opted in, no bets", frozenset({"user", "balance"})),
+    "last_place": (_TRASH_TALK_LAST_PLACE, "Last place", frozenset({"user", "balance"})),
+    "leader": (_TRASH_TALK_LEADER, "First place", frozenset({"user", "balance"})),
+    "knockout": (_KNOCKOUT_ZINGERS, "Parlay knockout alert", frozenset({"user", "bet"})),
+}
+
+MAX_ROAST_LENGTH = 300
+
+
+def validate_roast_template(category: str, template: str) -> str | None:
+    """Why a submitted roast line can't be used, or None if it's fine. Catches
+    anything that would blow up at .format() time - a typo'd placeholder or
+    a stray brace - so a bad line is rejected when it's added, not when it
+    crashes a roast weeks later."""
+    if category not in ROAST_CATEGORIES:
+        return f"Unknown category `{category}`."
+    if len(template) > MAX_ROAST_LENGTH:
+        return f"Keep it under {MAX_ROAST_LENGTH} characters."
+    allowed = ROAST_CATEGORIES[category][2]
+    try:
+        fields = {name for _, name, _, _ in string.Formatter().parse(template) if name is not None}
+    except ValueError:
+        return "Unbalanced `{` or `}` - placeholders look like `{user}`."
+    if "user" not in fields:
+        return "Include `{user}` so the bot knows where the @mention goes."
+    unknown = fields - allowed
+    if unknown:
+        allowed_text = ", ".join(f"`{{{name}}}`" for name in sorted(allowed))
+        return f"`{{{sorted(unknown)[0]}}}` doesn't work here. This category can use {allowed_text}."
+    return None

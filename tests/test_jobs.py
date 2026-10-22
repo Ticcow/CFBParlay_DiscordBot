@@ -798,3 +798,31 @@ async def test_post_trash_talk_doesnt_repeat_a_line_until_the_pool_runs_dry(conn
         await jobs.post_trash_talk(bot)
 
     assert len(set(bot.announcements)) == jobs.TRASH_TALK_RECENT_LIMIT
+
+
+async def test_post_trash_talk_uses_custom_roasts(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(conn, week_id, user_id=1, home="Texas", away="Ohio State")
+    repository.add_custom_roast(conn, "generic", "{user} custom-only line", added_by=7)
+
+    await jobs.post_trash_talk(bot, choice_fn=lambda options: options[-1])
+
+    assert bot.announcements == ["<@1> custom-only line"]
+
+
+async def test_knockout_alert_can_use_a_custom_knockout_roast(conn, monkeypatch):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(conn, week_id, user_id=42, home="Texas", away="Ohio State")
+    repository.add_custom_roast(conn, "knockout", "{user} custom knockout on {bet}", added_by=7)
+    real_zinger = zingers.get_knockout_zinger
+    monkeypatch.setattr(
+        zingers, "get_knockout_zinger",
+        lambda mention, bet, custom=(): real_zinger(mention, bet, custom, choice_fn=lambda o: o[-1]),
+    )
+    bot.cfbd.games = [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 10, 24)]
+
+    await jobs.poll_scores(bot)
+
+    assert "<@42> custom knockout on Texas (-150)" in bot.announcements[0]

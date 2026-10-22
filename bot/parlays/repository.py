@@ -916,3 +916,31 @@ def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
         (key, value),
     )
     conn.commit()
+
+
+# --- custom roasts (added from Discord via /admin add-roast) ---
+
+
+def add_custom_roast(conn: sqlite3.Connection, category: str, template: str, added_by: int) -> int | None:
+    """Returns the new roast's id, or None if that exact line is already in
+    that category."""
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO custom_roasts (category, template, added_by) VALUES (?, ?, ?)",
+        (category, template, added_by),
+    )
+    conn.commit()
+    return cursor.lastrowid if cursor.rowcount else None
+
+
+def list_custom_roasts(conn: sqlite3.Connection, category: str | None = None) -> list[sqlite3.Row]:
+    if category is None:
+        return conn.execute("SELECT * FROM custom_roasts ORDER BY id").fetchall()
+    return conn.execute(
+        "SELECT * FROM custom_roasts WHERE category = ? ORDER BY id", (category,)
+    ).fetchall()
+
+
+def remove_custom_roast(conn: sqlite3.Connection, roast_id: int) -> bool:
+    cursor = conn.execute("DELETE FROM custom_roasts WHERE id = ?", (roast_id,))
+    conn.commit()
+    return cursor.rowcount > 0

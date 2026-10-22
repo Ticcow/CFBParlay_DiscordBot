@@ -10,7 +10,7 @@ from bot.commands import status_panel
 from bot.integrations import team_aliases
 from bot.integrations.cfbd_client import CfbdGame, RankedTeam
 from bot.integrations.odds_client import OddsEvent
-from bot.parlays import repository, timeutils
+from bot.parlays import repository, timeutils, zingers
 from bot.scheduler import jobs as scheduler_jobs
 from bot.scheduler import season
 
@@ -37,10 +37,10 @@ TEST_GAMES = [
 ]
 TEST_RANKINGS = [(1, "Georgia"), (2, "Ohio State"), (3, "Alabama"), (4, "Michigan"), (5, "Notre Dame")]
 
-# Resetting a week deletes real bets/opt-ins, unlike the rest of /admin (sync,
-# refresh, grade) which is safe for anyone to run - so this one command gets
-# an actual permission check instead of staying open to the whole server.
-RESET_WEEK_ALLOWED_USER_IDS = {
+# Most of /admin (sync, refresh, grade) is safe for anyone to run. These users
+# alone can do the things that aren't: resetting a week deletes real bets,
+# and custom roasts get posted publicly in the bot's name.
+TRUSTED_ADMIN_USER_IDS = {
     151856216858034176,  # Tenenbaum
     151910709322711040,  # Ticcow
 }
@@ -201,7 +201,7 @@ async def handle_refresh_scores(interaction: discord.Interaction) -> None:
 
 
 async def handle_reset_week(interaction: discord.Interaction) -> None:
-    if interaction.user.id not in RESET_WEEK_ALLOWED_USER_IDS:
+    if interaction.user.id not in TRUSTED_ADMIN_USER_IDS:
         await interaction.response.send_message(
             "Only Tenenbaum or Ticcow can reset a week.", ephemeral=True
         )
@@ -480,6 +480,80 @@ class AdminCog(commands.GroupCog, name="admin"):
     )
     async def reset_week_cmd(self, interaction: discord.Interaction):
         await handle_reset_week(interaction)
+
+    @app_commands.command(
+        name="add-roast",
+        description="[Tenenbaum/Ticcow only] Add a line to the bot's roast pool - use {user} for the @mention",
+    )
+    @app_commands.describe(
+        roast="The line, e.g. '{user} bets like a raccoon in a casino'. {balance} and {bet} also work",
+        category="When it can come up (default: any time)",
+    )
+    @app_commands.choices(
+        category=[
+            app_commands.Choice(name=label, value=key)
+            for key, (_, label, _) in zingers.ROAST_CATEGORIES.items()
+        ]
+    )
+    async def add_roast_cmd(
+        self, interaction: discord.Interaction, roast: str, category: app_commands.Choice[str] | None = None
+    ):
+        if interaction.user.id not in TRUSTED_ADMIN_USER_IDS:
+            await interaction.response.send_message("Only Tenenbaum or Ticcow can add roasts.", ephemeral=True)
+            return
+        category_key = category.value if category else "generic"
+        roast = roast.strip()
+        problem = zingers.validate_roast_template(category_key, roast)
+        if problem:
+            await interaction.response.send_message(f"Couldn't add that: {problem}", ephemeral=True)
+            return
+        roast_id = repository.add_custom_roast(self.bot.conn, category_key, roast, interaction.user.id)
+        if roast_id is None:
+            await interaction.response.send_message("That exact line is already in the pool.", ephemeral=True)
+            return
+        preview = roast.format(user=interaction.user.mention, balance="$1,234", bet="Texas -6.5 (-110)")
+        label = zingers.ROAST_CATEGORIES[category_key][1]
+        await interaction.response.send_message(
+            f"Added roast #{roast_id} ({label}). Preview:\n> {preview}", ephemeral=True
+        )
+
+    @app_commands.command(name="list-roasts", description="Show the roasts added with /admin add-roast")
+    async def list_roasts_cmd(self, interaction: discord.Interaction):
+        rows = repository.list_custom_roasts(self.bot.conn)
+        if not rows:
+            await interaction.response.send_message(
+                "No custom roasts yet - add one with /admin add-roast.", ephemeral=True
+            )
+            return
+        lines = [
+            f"#{row['id']} ({zingers.ROAST_CATEGORIES[row['category']][1]}): {row['template']}" for row in rows
+        ]
+        message = "\n".join(lines)
+        if len(message) > 1900:
+            message = message[:1900].rsplit("\n", 1)[0] + "\n...and more"
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @app_commands.command(
+        name="remove-roast", description="[Tenenbaum/Ticcow only] Remove a roast added with /admin add-roast"
+    )
+    @app_commands.describe(roast="Which roast to remove")
+    async def remove_roast_cmd(self, interaction: discord.Interaction, roast: int):
+        if interaction.user.id not in TRUSTED_ADMIN_USER_IDS:
+            await interaction.response.send_message("Only Tenenbaum or Ticcow can remove roasts.", ephemeral=True)
+            return
+        if repository.remove_custom_roast(self.bot.conn, roast):
+            await interaction.response.send_message(f"Removed roast #{roast}.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"There's no custom roast #{roast}.", ephemeral=True)
+
+    @remove_roast_cmd.autocomplete("roast")
+    async def remove_roast_autocomplete(self, interaction: discord.Interaction, current: str):
+        rows = repository.list_custom_roasts(self.bot.conn)
+        return [
+            app_commands.Choice(name=f"#{row['id']}: {row['template']}"[:100], value=row["id"])
+            for row in rows
+            if current.lower() in row["template"].lower() or current == str(row["id"])
+        ][:25]
 
     @app_commands.command(
         name="cleanup-channel",

@@ -120,3 +120,40 @@ def test_roast_pools_are_big_and_have_no_duplicates():
     for pool in pools:
         assert len(pool) >= 12
         assert len(set(pool)) == len(pool)
+
+
+def test_validate_roast_template_accepts_good_lines():
+    assert zingers.validate_roast_template("generic", "{user} sucks at this, {balance} proves it") is None
+    assert zingers.validate_roast_template("knockout", "{user} lost on {bet} lol") is None
+
+
+def test_validate_roast_template_rejects_lines_that_would_break_at_post_time():
+    assert "{user}" in zingers.validate_roast_template("generic", "no mention here")
+    assert "{bet}" in zingers.validate_roast_template("generic", "{user} lost on {bet}")
+    assert "{balance}" in zingers.validate_roast_template("knockout", "{user} at {balance}")
+    assert "{usr}" in zingers.validate_roast_template("generic", "{user} and {usr}")
+    assert "Unbalanced" in zingers.validate_roast_template("generic", "{user} is {dumb")
+    assert "300" in zingers.validate_roast_template("generic", "{user} " + "x" * 300)
+
+
+def test_every_built_in_roast_passes_its_own_validation():
+    for category, (pool, _, _) in zingers.ROAST_CATEGORIES.items():
+        for line in pool:
+            assert zingers.validate_roast_template(category, line) is None, line
+
+
+def test_get_trash_talk_can_pick_a_custom_line():
+    custom_line = "{user} custom roast"
+    message, template = zingers.get_trash_talk(
+        "<@1>", "$0", [], has_bets=True, is_last=False, is_leader=False,
+        custom={"generic": [custom_line]}, choice_fn=lambda options: options[-1],
+    )
+    assert template == custom_line
+    assert message == "<@1> custom roast"
+
+
+def test_get_knockout_zinger_can_pick_a_custom_line():
+    line = zingers.get_knockout_zinger(
+        "<@1>", "UCF -41.5 (-110)", ["{user} ate shit on {bet}"], choice_fn=lambda options: options[-1]
+    )
+    assert line == "<@1> ate shit on UCF -41.5 (-110)"

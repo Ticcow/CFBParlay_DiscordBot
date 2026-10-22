@@ -119,7 +119,7 @@ async def grade_week_job(bot) -> dict:
     return result
 
 
-def _elimination_message(entry: dict) -> str:
+def _elimination_message(entry: dict, custom_knockouts=()) -> str:
     mention = f"<@{entry['user_id']}>"
     leg = entry["leg"]
     bet = formatting.format_selection_button_label(
@@ -128,7 +128,7 @@ def _elimination_message(entry: dict) -> str:
     return (
         f"🥊 {mention}'s parlay has been KNOCKED OUT!\n"
         f"{formatting.format_leg(leg)}\n"
-        f"{zingers.get_knockout_zinger(mention, bet)}"
+        f"{zingers.get_knockout_zinger(mention, bet, custom_knockouts)}"
     )
 
 
@@ -139,9 +139,10 @@ async def _grade_pending_and_announce(bot, week_id: int) -> list[dict]:
     Sunday fallback / manual /admin grade-week path), so a knockout gets
     announced no matter which one actually ends up grading it."""
     graded_legs = grading.grade_pending_legs(bot.conn, week_id)
+    custom_knockouts = [row["template"] for row in repository.list_custom_roasts(bot.conn, "knockout")]
     for entry in graded_legs:
         if entry["result"] == "loss" and not entry["already_had_loss"]:
-            await bot.announce(_elimination_message(entry))
+            await bot.announce(_elimination_message(entry, custom_knockouts))
     return graded_legs
 
 
@@ -307,6 +308,13 @@ async def trash_talk_job(bot, random_fn=random.random, choice_fn=random.choice) 
     # else nobody's opted in yet - try again in the next slot
 
 
+def _custom_roasts_by_category(conn) -> dict[str, list[str]]:
+    by_category: dict[str, list[str]] = {}
+    for row in repository.list_custom_roasts(conn):
+        by_category.setdefault(row["category"], []).append(row["template"])
+    return by_category
+
+
 async def post_trash_talk(bot, random_fn=random.random, choice_fn=random.choice) -> bool:
     """Roasts one opted-in player right now (Howler-weighted, see
     pick_trash_talk_target). Shared by the daily job and the panel's Talk
@@ -345,6 +353,7 @@ async def post_trash_talk(bot, random_fn=random.random, choice_fn=random.choice)
         is_last=ranked and row["current_balance"] == min(balances),
         is_leader=ranked and row["current_balance"] == max(balances),
         recent=recent,
+        custom=_custom_roasts_by_category(bot.conn),
         choice_fn=choice_fn,
     )
     recent = [t for t in recent if t != template] + [template]
