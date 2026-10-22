@@ -87,17 +87,19 @@ def get_flair_reaction(team: str | None, username: str, choice_fn=random.choice)
     return line.format(user=username)
 
 
+# The group signed off on these being crass (2026-10). Keep them aimed at
+# people's bets, records and decision-making - never slurs or who someone is.
 _KNOCKOUT_ZINGERS = [
-    "{user} rode {bet} straight off a cliff.",
-    "{bet} said trust me, {user} said okay, and now {user} is done for the week.",
-    "{user}'s {bet} pick just got sent to the shadow realm.",
-    "Down goes {user} - {bet} never had a pulse.",
-    "{user} bet the fake house on {bet}. The house said no.",
-    "{bet}? {user} really believed in that one. RIP.",
-    "{user} is out. {bet} took the whole parlay down with it.",
-    "That {bet} pick just knocked {user} out cold.",
-    "{user} really thought {bet} was walking in. It did not.",
-    "{bet} - {user}'s parlay's final words.",
+    "{user} rode {bet} straight into a fucking wall.",
+    "{bet}?? {user}, what the fuck were you thinking.",
+    "{user}'s parlay just got taken out back and shot. Cause of death: {bet}.",
+    "Down goes {user}. {bet} was dogshit and everyone knew it but you.",
+    "{user} bet the fake house on {bet} and the house said get fucked.",
+    "Holy shit {user}, {bet}? You deserved that.",
+    "{user} is done. {bet} pissed all over the whole parlay.",
+    "That {bet} pick just shit the bed and {user} is lying in it.",
+    "{user} really thought {bet} was a lock. It was a fucking anchor.",
+    "{bet} - the last words of {user}'s dumbass parlay.",
 ]
 
 
@@ -111,33 +113,34 @@ def get_knockout_zinger(mention: str, bet_description: str, choice_fn=random.cho
 
 
 _TRASH_TALK_BUSTED_BET = [
-    "{user} put real (fake) money on {bet}. Still not over it.",
-    "Daily reminder that {user} bet {bet}. That's it, that's the post.",
-    "{user}, {bet}? Who hurt you?",
-    "Thoughts and prayers to {user}'s bankroll after that {bet} pick.",
-    "Somewhere a sportsbook is framing {user}'s {bet} ticket.",
+    "{user} put money on {bet}. Fake money, sure, but still the dumbest shit I've seen all week.",
+    "Daily reminder that {user} bet {bet}. Absolute clown shit.",
+    "{user}, {bet}? Were you drunk or just like this?",
+    "Somewhere a sportsbook is framing {user}'s {bet} ticket and laughing its ass off.",
+    "{user} still hasn't apologized to the group for {bet}. Disgraceful.",
 ]
 _TRASH_TALK_LAST_PLACE = [
-    "{user} is dead last at {balance}. Parlays aren't a personality, champ.",
-    "Somebody check on {user}, sitting at {balance} in last place.",
-    "{user} at {balance} and still giving out picks like anyone asked.",
+    "{user} is dead fucking last at {balance}. Delete the app.",
+    "Somebody check on {user}, rotting in last place at {balance}.",
+    "{user} at {balance} and still running their mouth with picks. Shut the fuck up.",
 ]
 _TRASH_TALK_LEADER = [
-    "{user} on top at {balance} acting like a genius. Regression is undefeated.",
-    "Enjoy first place while it lasts, {user}. The books always collect.",
-    "{user} up to {balance} and already shopping for a yacht. Relax.",
+    "{user} on top at {balance} acting like a genius. Lucky as shit and it won't last.",
+    "Enjoy first place while it lasts, {user}. The books are coming for your ass.",
+    "{user} up to {balance} and already insufferable. Somebody humble this asshole.",
 ]
 _TRASH_TALK_NO_BETS = [
-    "{user} opted in and hasn't placed a single bet. Scared money don't make money.",
-    "{user} out here holding {balance} like it's a 401k. Bet something.",
-    "{user} joined the game just to watch. Bold strategy.",
+    "{user} opted in and hasn't placed a single bet. Scared money don't make money, you spineless fuck.",
+    "{user} sitting on {balance} like it's a fucking 401k. Bet something, coward.",
+    "{user} joined just to watch. Get the fuck in the game.",
 ]
 _TRASH_TALK_GENERIC = [
-    "{user} has the betting instincts of a coin that landed on its edge.",
-    "Every time {user} locks a pick, Vegas sends a thank-you card.",
-    "{user}'s whole strategy is vibes and poor decisions.",
-    "If {user} likes a team this week, take the other side. Free money.",
-    "{user} handicaps games by reading tea leaves in the dark.",
+    "{user} has the betting instincts of a drunk raccoon.",
+    "Every time {user} locks a pick, Vegas sends a thank-you card and a fruit basket.",
+    "{user}'s whole strategy is vibes, Fireball and poor fucking decisions.",
+    "If {user} likes a team this week, hammer the other side. Free fucking money.",
+    "{user} picks games like they're throwing darts blindfolded. And missing the board.",
+    "{user} couldn't hit a parlay if the games were already over.",
 ]
 
 
