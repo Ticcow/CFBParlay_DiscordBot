@@ -101,6 +101,13 @@ def test_format_payout_and_status_shows_actual_payout_and_result_once_graded():
     assert status_label == "WIN"
 
 
+def test_format_payout_and_status_uses_thousands_separators():
+    pending = make_parlay(potential_payout_dollars=14113.78)
+    graded = make_parlay(status="graded", result="win", actual_payout_dollars=3484.19)
+    assert formatting.format_payout_and_status(pending)[0] == "$14,113.78 potential"
+    assert formatting.format_payout_and_status(graded)[0] == "$3,484.19 payout"
+
+
 def test_format_payout_and_status_handles_missing_potential_payout():
     payout_text, _ = formatting.format_payout_and_status(
         make_parlay(status="submitted", potential_payout_dollars=None)

@@ -467,7 +467,7 @@ def _wager_screen(bot, parlay_id: int, participant) -> tuple[discord.Embed, "Wag
     leg_summary = "\n".join(formatting.format_leg(leg) for leg in legs)
     embed = discord.Embed(
         title="Choose your wager",
-        description=f"{leg_summary}\n\nYour balance: ${participant['current_balance']:.2f}",
+        description=f"{leg_summary}\n\nYour balance: ${participant['current_balance']:,.2f}",
     )
     return embed, WagerView(bot, parlay_id, participant["id"], participant["current_balance"])
 
@@ -489,7 +489,7 @@ class WagerView(discord.ui.View):
         for label, amount in payout.wager_presets(self.balance):
             potential = payout.potential_payout(amount, prices)
             button = discord.ui.Button(
-                label=f"{label} → ${potential:.2f}", style=discord.ButtonStyle.success
+                label=f"{label} → ${potential:,.2f}", style=discord.ButtonStyle.success
             )
             button.callback = self._make_callback(amount)
             self.add_item(button)
@@ -520,8 +520,8 @@ class WagerView(discord.ui.View):
         embed = discord.Embed(
             title="Confirm your parlay",
             description=(
-                f"{leg_summary}\n\nWager: ${amount:.2f}\nPotential payout: ${potential:.2f}\n"
-                f"Balance after: ${self.balance - amount:.2f}"
+                f"{leg_summary}\n\nWager: ${amount:,.2f}\nPotential payout: ${potential:,.2f}\n"
+                f"Balance after: ${self.balance - amount:,.2f}"
             ),
         )
         view = ConfirmSubmitView(self.bot, self.parlay_id, self.participant_id, amount, potential, interaction.user.id)
@@ -547,7 +547,7 @@ class WagerModal(discord.ui.Modal, title="Custom wager amount"):
             return
         if amount <= 0 or amount > self.wager_view.balance:
             await interaction.response.send_message(
-                f"Enter an amount between $0.01 and ${self.wager_view.balance:.2f}.", ephemeral=True
+                f"Enter an amount between $0.01 and ${self.wager_view.balance:,.2f}.", ephemeral=True
             )
             return
         await self.wager_view.confirm(interaction, amount)
@@ -581,7 +581,7 @@ class ConfirmSubmitView(discord.ui.View):
             return
         embed = discord.Embed(
             title="Parlay submitted! 🎉",
-            description=f"Wager ${self.wager:.2f}, potential payout ${self.potential:.2f}.",
+            description=f"Wager ${self.wager:,.2f}, potential payout ${self.potential:,.2f}.",
         )
         await interaction.response.edit_message(embed=embed, view=None)
         await status_panel.refresh(self.bot)

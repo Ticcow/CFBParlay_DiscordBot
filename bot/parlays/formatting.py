@@ -33,9 +33,9 @@ def format_payout_and_status(parlay) -> tuple[str, str]:
     once graded, potential payout + the raw status (submitted/locked) while
     still pending. Shared by the status panel and /parlays so both agree."""
     if parlay["status"] == "graded":
-        return f"${parlay['actual_payout_dollars']:.2f} payout", parlay["result"].upper()
+        return f"${parlay['actual_payout_dollars']:,.2f} payout", parlay["result"].upper()
     potential = (
-        f"${parlay['potential_payout_dollars']:.2f}"
+        f"${parlay['potential_payout_dollars']:,.2f}"
         if parlay["potential_payout_dollars"] is not None
         else "-"
     )
