@@ -139,6 +139,14 @@ class PanelActionsView(discord.ui.View):
 
         await admin.handle_refresh_scores(interaction)
 
+    @discord.ui.button(
+        label="✍️ Add Roast", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:add_roast", row=1
+    )
+    async def add_roast_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        from bot.commands import admin
+
+        await admin.handle_open_add_roast(interaction)
+
 
 def _add_season_leaderboard_field(bot, embed: discord.Embed) -> None:
     rows = repository.season_combined_leaderboard(bot.conn)

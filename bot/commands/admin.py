@@ -37,9 +37,9 @@ TEST_GAMES = [
 ]
 TEST_RANKINGS = [(1, "Georgia"), (2, "Ohio State"), (3, "Alabama"), (4, "Michigan"), (5, "Notre Dame")]
 
-# Most of /admin (sync, refresh, grade) is safe for anyone to run. These users
-# alone can do the things that aren't: resetting a week deletes real bets,
-# and custom roasts get posted publicly in the bot's name.
+# Most of /admin (sync, refresh, grade, adding a roast) is open to anyone.
+# These users alone can do what isn't safe to leave open: resetting a week
+# deletes real bets, and removing roasts is moderation.
 TRUSTED_ADMIN_USER_IDS = {
     151856216858034176,  # Tenenbaum
     151910709322711040,  # Ticcow
@@ -197,6 +197,85 @@ async def handle_refresh_scores(interaction: discord.Interaction) -> None:
     final_count = sum(1 for g in games if g["status"] == "final")
     await interaction.followup.send(
         f"Scores refreshed - {final_count}/{len(games)} games final.", ephemeral=True
+    )
+
+
+async def handle_add_roast(interaction: discord.Interaction, category: str, roast: str) -> None:
+    """Adds a line to the roast pool - shared by /admin add-roast and the
+    panel's Add Roast button. Open to everyone so the whole group can
+    contribute; removing lines stays with TRUSTED_ADMIN_USER_IDS."""
+    roast = roast.strip()
+    problem = zingers.validate_roast_template(category, roast)
+    if problem:
+        await interaction.response.send_message(f"Couldn't add that: {problem}", ephemeral=True)
+        return
+    roast_id = repository.add_custom_roast(interaction.client.conn, category, roast, interaction.user.id)
+    if roast_id is None:
+        await interaction.response.send_message("That exact line is already in the pool.", ephemeral=True)
+        return
+    preview = roast.format(user=interaction.user.mention, balance="$1,234", bet="Texas -6.5 (-110)")
+    label = zingers.ROAST_CATEGORIES[category][1]
+    await interaction.response.send_message(
+        f"Added roast #{roast_id} ({label}). Preview:\n> {preview}", ephemeral=True
+    )
+
+
+_ROAST_PLACEHOLDER_HINTS = {
+    "user": "{user} = the @mention",
+    "balance": "{balance} = their dollars",
+    "bet": "{bet} = the losing pick",
+}
+
+
+class AddRoastModal(discord.ui.Modal, title="Add a roast"):
+    roast = discord.ui.TextInput(
+        label="Your roast",
+        style=discord.TextStyle.paragraph,
+        placeholder="{user} bets like a raccoon in a casino",
+        max_length=zingers.MAX_ROAST_LENGTH,
+    )
+
+    def __init__(self, category: str):
+        super().__init__()
+        self.category = category
+        allowed = zingers.ROAST_CATEGORIES[category][2]
+        hints = ", ".join(_ROAST_PLACEHOLDER_HINTS[name] for name in ("user", "balance", "bet") if name in allowed)
+        self.roast.placeholder = f"Use {hints}"[:100]
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await handle_add_roast(interaction, self.category, self.roast.value)
+
+
+class AddRoastCategoryView(discord.ui.View):
+    """Step one of the panel's Add Roast flow - a modal can't hold a dropdown,
+    so the category gets picked here first, then the modal collects the line."""
+
+    def __init__(self):
+        super().__init__(timeout=180)
+        select = discord.ui.Select(
+            placeholder="When should this roast come up?",
+            options=[
+                discord.SelectOption(
+                    label=label,
+                    value=key,
+                    description=", ".join(f"{{{name}}}" for name in ("user", "balance", "bet") if name in allowed),
+                )
+                for key, (_, label, allowed) in zingers.ROAST_CATEGORIES.items()
+            ],
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+        self._select = select
+
+    async def _on_select(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(AddRoastModal(self._select.values[0]))
+
+
+async def handle_open_add_roast(interaction: discord.Interaction) -> None:
+    await interaction.response.send_message(
+        "Pick when your roast should come up, then write it. Use `{user}` where the @mention goes.",
+        view=AddRoastCategoryView(),
+        ephemeral=True,
     )
 
 
@@ -483,7 +562,7 @@ class AdminCog(commands.GroupCog, name="admin"):
 
     @app_commands.command(
         name="add-roast",
-        description="[Tenenbaum/Ticcow only] Add a line to the bot's roast pool - use {user} for the @mention",
+        description="Add a line to the bot's roast pool - use {user} for the @mention",
     )
     @app_commands.describe(
         roast="The line, e.g. '{user} bets like a raccoon in a casino'. {balance} and {bet} also work",
@@ -498,24 +577,7 @@ class AdminCog(commands.GroupCog, name="admin"):
     async def add_roast_cmd(
         self, interaction: discord.Interaction, roast: str, category: app_commands.Choice[str] | None = None
     ):
-        if interaction.user.id not in TRUSTED_ADMIN_USER_IDS:
-            await interaction.response.send_message("Only Tenenbaum or Ticcow can add roasts.", ephemeral=True)
-            return
-        category_key = category.value if category else "generic"
-        roast = roast.strip()
-        problem = zingers.validate_roast_template(category_key, roast)
-        if problem:
-            await interaction.response.send_message(f"Couldn't add that: {problem}", ephemeral=True)
-            return
-        roast_id = repository.add_custom_roast(self.bot.conn, category_key, roast, interaction.user.id)
-        if roast_id is None:
-            await interaction.response.send_message("That exact line is already in the pool.", ephemeral=True)
-            return
-        preview = roast.format(user=interaction.user.mention, balance="$1,234", bet="Texas -6.5 (-110)")
-        label = zingers.ROAST_CATEGORIES[category_key][1]
-        await interaction.response.send_message(
-            f"Added roast #{roast_id} ({label}). Preview:\n> {preview}", ephemeral=True
-        )
+        await handle_add_roast(interaction, category.value if category else "generic", roast)
 
     @app_commands.command(name="list-roasts", description="Show the roasts added with /admin add-roast")
     async def list_roasts_cmd(self, interaction: discord.Interaction):
@@ -526,7 +588,9 @@ class AdminCog(commands.GroupCog, name="admin"):
             )
             return
         lines = [
-            f"#{row['id']} ({zingers.ROAST_CATEGORIES[row['category']][1]}): {row['template']}" for row in rows
+            f"#{row['id']} ({zingers.ROAST_CATEGORIES[row['category']][1]}, added by <@{row['added_by']}>): "
+            f"{row['template']}"
+            for row in rows
         ]
         message = "\n".join(lines)
         if len(message) > 1900:
