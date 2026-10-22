@@ -297,13 +297,21 @@ async def trash_talk_job(bot, random_fn=random.random, choice_fn=random.choice) 
         return
     if random_fn() >= trash_talk_slot_odds(now.astimezone(EASTERN)):
         return
+    if await post_trash_talk(bot, random_fn, choice_fn):
+        repository.set_state(bot.conn, _TRASH_TALK_STATE_KEY, today)
+    # else nobody's opted in yet - try again in the next slot
 
+
+async def post_trash_talk(bot, random_fn=random.random, choice_fn=random.choice) -> bool:
+    """Roasts one opted-in player right now (Howler-weighted, see
+    pick_trash_talk_target). Shared by the daily job and the panel's Talk
+    Shit button. Returns False if there's nobody opted in to roast."""
     week = repository.get_latest_week(bot.conn)
     if week is None:
-        return
+        return False
     standings = repository.list_week_standings(bot.conn, week["id"])
     if not standings:
-        return  # nobody opted in - try again in the next slot
+        return False
 
     target = pick_trash_talk_target([row["user_id"] for row in standings], random_fn, choice_fn)
     row = next(r for r in standings if r["user_id"] == target)
@@ -332,8 +340,8 @@ async def trash_talk_job(bot, random_fn=random.random, choice_fn=random.choice) 
         is_leader=ranked and row["current_balance"] == max(balances),
         choice_fn=choice_fn,
     )
-    repository.set_state(bot.conn, _TRASH_TALK_STATE_KEY, today)
     await bot.announce(message)
+    return True
 
 
 async def channel_cleanup_job(bot) -> int:

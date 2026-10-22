@@ -766,3 +766,24 @@ async def test_trash_talk_job_calls_out_last_place_once_the_week_is_settled(conn
 
     assert "<@2>" in bot.announcements[0]
     assert "$0" in bot.announcements[0]
+
+
+async def test_post_trash_talk_posts_on_demand_even_after_the_daily_one(conn, monkeypatch):
+    # the panel button isn't limited by the once-a-day schedule
+    monkeypatch.setattr(timeutils, "utc_now", lambda: EASTERN_8PM)
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+    await jobs.trash_talk_job(bot, random_fn=lambda: 0.0)
+
+    assert await jobs.post_trash_talk(bot) is True
+    assert await jobs.post_trash_talk(bot) is True
+    assert len(bot.announcements) == 3
+
+
+async def test_post_trash_talk_does_nothing_with_nobody_opted_in(conn):
+    bot = FakeBot(conn)
+    repository.upsert_week(conn, 2026, 1, "regular")
+
+    assert await jobs.post_trash_talk(bot) is False
+    assert bot.announcements == []

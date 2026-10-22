@@ -104,6 +104,18 @@ class PanelActionsView(discord.ui.View):
         await leaderboard.handle_show_parlay_details(interaction)
 
     @discord.ui.button(
+        label="🗣️ Talk Shit", style=discord.ButtonStyle.danger, custom_id="degen_bot:panel:talk_shit", row=0
+    )
+    async def talk_shit_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        from bot.scheduler import jobs
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if await jobs.post_trash_talk(interaction.client):
+            await interaction.followup.send("Done. 🔥", ephemeral=True)
+        else:
+            await interaction.followup.send("Nobody's opted in this week to roast.", ephemeral=True)
+
+    @discord.ui.button(
         label="🔄 Sync All", style=discord.ButtonStyle.secondary, custom_id="degen_bot:panel:sync_all", row=1
     )
     async def sync_all_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
