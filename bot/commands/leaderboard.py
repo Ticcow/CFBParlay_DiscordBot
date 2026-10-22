@@ -34,7 +34,7 @@ async def handle_show_parlay_details(
     for parlay in parlays[:MAX_PARLAY_FIELDS]:
         legs = repository.list_legs_with_games(bot.conn, parlay["id"])
         leg_text = "\n".join(formatting.format_leg(leg) for leg in legs)
-        wager = f"${parlay['wager_dollars']:,.2f}" if parlay["wager_dollars"] is not None else "-"
+        wager = f"{formatting.format_dollars(parlay['wager_dollars'])}" if parlay["wager_dollars"] is not None else "-"
         payout_text, status_label = formatting.format_payout_and_status(parlay)
         username = await resolve_username(bot, parlay["user_id"])
         embed.add_field(
@@ -90,7 +90,7 @@ class LeaderboardCog(commands.Cog):
             lines = [f"Week {week['week_number']} standings:"]
             for i, row in enumerate(rows, start=1):
                 crown = " 🏆" if row["is_weekly_winner"] else ""
-                lines.append(f"{i}. <@{row['user_id']}> — ${row['current_balance']:,.2f}{crown}")
+                lines.append(f"{i}. <@{row['user_id']}> — {formatting.format_dollars(row['current_balance'])}{crown}")
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             return
 
@@ -103,7 +103,7 @@ class LeaderboardCog(commands.Cog):
         else:
             rows = repository.season_money_leaderboard(self.bot.conn)
             lines = ["Season leaderboard - most money won:"] + [
-                f"{i}. <@{row['user_id']}> — ${row['net']:,.2f} net"
+                f"{i}. <@{row['user_id']}> — {formatting.format_dollars(row['net'])} net"
                 for i, row in enumerate(rows, start=1)
             ]
 
@@ -121,7 +121,7 @@ class LeaderboardCog(commands.Cog):
 
         lines = [
             f"Weekly wins: {weekly_wins}",
-            f"Season net winnings: ${net:,.2f}",
+            f"Season net winnings: {formatting.format_dollars(net)}",
             f"Parlay record: {record.get('win', 0)}-{record.get('loss', 0)}-{record.get('push', 0)} (W-L-P)",
         ]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
@@ -148,7 +148,7 @@ class LeaderboardCog(commands.Cog):
             lines.append("(nobody opted in)")
         for i, row in enumerate(rows, start=1):
             crown = " 🏆" if row["is_weekly_winner"] else ""
-            lines.append(f"{i}. <@{row['user_id']}> — ${row['current_balance']:,.2f}{crown}")
+            lines.append(f"{i}. <@{row['user_id']}> — {formatting.format_dollars(row['current_balance'])}{crown}")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @history.autocomplete("week")

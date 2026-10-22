@@ -445,7 +445,7 @@ async def test_evening_digest_includes_fully_graded_parlays(conn):
     assert len(bot.announcements) == 1
     assert "<@1>" in bot.announcements[0]
     assert "[LOSS]" in bot.announcements[0]
-    assert "$0.00 payout" in bot.announcements[0]
+    assert "$0 payout" in bot.announcements[0]
 
 
 async def test_evening_digest_lists_active_parlays_with_payout_and_progress(conn):
@@ -468,7 +468,7 @@ async def test_evening_digest_lists_active_parlays_with_payout_and_progress(conn
 
     assert len(bot.announcements) == 1
     assert "<@1>" in bot.announcements[0]
-    assert "$166.67" in bot.announcements[0]
+    assert "$167" in bot.announcements[0]
     assert "1/1 legs decided" in bot.announcements[0]
 
 

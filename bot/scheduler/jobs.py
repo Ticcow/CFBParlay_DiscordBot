@@ -95,7 +95,7 @@ async def grade_week_job(bot) -> dict:
         lines = [f"🏆 Week {week['week_number']} is final!"]
         for i, row in enumerate(rows, start=1):
             crown = " 🏆" if row["is_weekly_winner"] else ""
-            lines.append(f"{i}. <@{row['user_id']}> — ${row['current_balance']:,.2f}{crown}")
+            lines.append(f"{i}. <@{row['user_id']}> — {formatting.format_dollars(row['current_balance'])}{crown}")
         await bot.announce("\n".join(lines))
 
     if result["graded"]:
@@ -241,7 +241,7 @@ async def evening_digest_job(bot) -> None:
     for parlay in submitted:
         legs = repository.list_legs_with_games(bot.conn, parlay["id"])
         decided = sum(1 for leg in legs if leg["result"] != "pending")
-        wager = f"${parlay['wager_dollars']:,.2f}"
+        wager = f"{formatting.format_dollars(parlay['wager_dollars'])}"
         mention = f"<@{parlay['user_id']}>"
 
         if parlay["status"] == "graded":
@@ -253,7 +253,7 @@ async def evening_digest_job(bot) -> None:
                 f"💀 {mention} — {wager} wager → KNOCKED OUT ({decided}/{len(legs)} legs decided)"
             )
         else:
-            potential = f"${parlay['potential_payout_dollars']:,.2f}"
+            potential = f"{formatting.format_dollars(parlay['potential_payout_dollars'])}"
             lines.append(
                 f"🏈 {mention} — {wager} wager → {potential} potential ({decided}/{len(legs)} legs decided)"
             )

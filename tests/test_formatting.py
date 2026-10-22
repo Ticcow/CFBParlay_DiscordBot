@@ -90,22 +90,29 @@ def make_parlay(**overrides):
 
 def test_format_payout_and_status_shows_potential_while_pending():
     payout_text, status_label = formatting.format_payout_and_status(make_parlay(status="locked"))
-    assert payout_text == "$277.78 potential"
+    assert payout_text == "$278 potential"
     assert status_label == "locked"
 
 
 def test_format_payout_and_status_shows_actual_payout_and_result_once_graded():
     parlay = make_parlay(status="graded", result="win", actual_payout_dollars=277.78)
     payout_text, status_label = formatting.format_payout_and_status(parlay)
-    assert payout_text == "$277.78 payout"
+    assert payout_text == "$278 payout"
     assert status_label == "WIN"
 
 
-def test_format_payout_and_status_uses_thousands_separators():
+def test_format_dollars_rounds_halves_up_and_puts_the_sign_before_the_dollar():
+    assert formatting.format_dollars(2.5) == "$3"  # not Python's round-half-to-even $2
+    assert formatting.format_dollars(1642.17) == "$1,642"
+    assert formatting.format_dollars(-150.0) == "-$150"
+    assert formatting.format_dollars(0.0) == "$0"
+
+
+def test_format_payout_and_status_uses_whole_dollars_with_separators():
     pending = make_parlay(potential_payout_dollars=14113.78)
     graded = make_parlay(status="graded", result="win", actual_payout_dollars=3484.19)
-    assert formatting.format_payout_and_status(pending)[0] == "$14,113.78 potential"
-    assert formatting.format_payout_and_status(graded)[0] == "$3,484.19 payout"
+    assert formatting.format_payout_and_status(pending)[0] == "$14,114 potential"
+    assert formatting.format_payout_and_status(graded)[0] == "$3,484 payout"
 
 
 def test_format_payout_and_status_handles_missing_potential_payout():

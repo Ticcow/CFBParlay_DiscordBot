@@ -62,7 +62,7 @@ async def test_build_embed_with_participants_and_no_bets(conn):
     embed = await status_panel._build_embed(FakeBot(conn), week)
 
     standings_field = next(f for f in embed.fields if "Standings" in f.name)
-    assert "$1,000.00" in standings_field.value
+    assert "$1,000 " in standings_field.value
     bets_field = next(f for f in embed.fields if f.name == "Bets")
     assert "No parlays submitted yet." in bets_field.value
 

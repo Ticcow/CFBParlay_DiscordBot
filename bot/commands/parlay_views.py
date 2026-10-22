@@ -467,7 +467,7 @@ def _wager_screen(bot, parlay_id: int, participant) -> tuple[discord.Embed, "Wag
     leg_summary = "\n".join(formatting.format_leg(leg) for leg in legs)
     embed = discord.Embed(
         title="Choose your wager",
-        description=f"{leg_summary}\n\nYour balance: ${participant['current_balance']:,.2f}",
+        description=f"{leg_summary}\n\nYour balance: {formatting.format_dollars(participant['current_balance'])}",
     )
     return embed, WagerView(bot, parlay_id, participant["id"], participant["current_balance"])
 
@@ -489,7 +489,7 @@ class WagerView(discord.ui.View):
         for label, amount in payout.wager_presets(self.balance):
             potential = payout.potential_payout(amount, prices)
             button = discord.ui.Button(
-                label=f"{label} → ${potential:,.2f}", style=discord.ButtonStyle.success
+                label=f"{label} → {formatting.format_dollars(potential)}", style=discord.ButtonStyle.success
             )
             button.callback = self._make_callback(amount)
             self.add_item(button)
@@ -520,8 +520,8 @@ class WagerView(discord.ui.View):
         embed = discord.Embed(
             title="Confirm your parlay",
             description=(
-                f"{leg_summary}\n\nWager: ${amount:,.2f}\nPotential payout: ${potential:,.2f}\n"
-                f"Balance after: ${self.balance - amount:,.2f}"
+                f"{leg_summary}\n\nWager: {formatting.format_dollars(amount)}\nPotential payout: {formatting.format_dollars(potential)}\n"
+                f"Balance after: {formatting.format_dollars(self.balance - amount)}"
             ),
         )
         view = ConfirmSubmitView(self.bot, self.parlay_id, self.participant_id, amount, potential, interaction.user.id)
@@ -541,13 +541,15 @@ class WagerModal(discord.ui.Modal, title="Custom wager amount"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            amount = round(float(self.amount.value), 2)
+            amount = float(self.amount.value.replace("$", "").replace(",", ""))
         except ValueError:
             await interaction.response.send_message("Enter a valid dollar amount.", ephemeral=True)
             return
-        if amount <= 0 or amount > self.wager_view.balance:
+        if amount != int(amount) or amount < 1 or amount > self.wager_view.balance:
             await interaction.response.send_message(
-                f"Enter an amount between $0.01 and ${self.wager_view.balance:,.2f}.", ephemeral=True
+                "Enter a whole-dollar amount between $1 and "
+                f"{formatting.format_dollars(self.wager_view.balance)}.",
+                ephemeral=True,
             )
             return
         await self.wager_view.confirm(interaction, amount)
@@ -581,7 +583,7 @@ class ConfirmSubmitView(discord.ui.View):
             return
         embed = discord.Embed(
             title="Parlay submitted! 🎉",
-            description=f"Wager ${self.wager:,.2f}, potential payout ${self.potential:,.2f}.",
+            description=f"Wager {formatting.format_dollars(self.wager)}, potential payout {formatting.format_dollars(self.potential)}.",
         )
         await interaction.response.edit_message(embed=embed, view=None)
         await status_panel.refresh(self.bot)

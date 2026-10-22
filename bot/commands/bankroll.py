@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.commands import status_panel
-from bot.parlays import repository
+from bot.parlays import formatting, repository
 
 
 async def handle_optin(interaction: discord.Interaction) -> None:
@@ -56,8 +56,8 @@ class BankrollCog(commands.Cog):
             return
 
         lines = [
-            f"Balance: ${participant['current_balance']:,.2f} "
-            f"(started at ${participant['starting_balance']:,.2f})"
+            f"Balance: {formatting.format_dollars(participant['current_balance'])} "
+            f"(started at {formatting.format_dollars(participant['starting_balance'])})"
         ]
         parlays = repository.list_parlays_for_user_week(
             self.bot.conn, interaction.user.id, week["id"]
@@ -67,7 +67,7 @@ class BankrollCog(commands.Cog):
             lines.append("Parlays this week:")
             for parlay in parlays:
                 wager = (
-                    f"${parlay['wager_dollars']:,.2f}"
+                    f"{formatting.format_dollars(parlay['wager_dollars'])}"
                     if parlay["wager_dollars"] is not None
                     else "-"
                 )

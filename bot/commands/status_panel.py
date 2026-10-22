@@ -137,7 +137,7 @@ def _add_season_leaderboard_field(bot, embed: discord.Embed) -> None:
         wins = row["wins"] or 0
         net = row["net"] or 0.0
         win_word = "win" if wins == 1 else "wins"
-        lines.append(f"{i}. <@{row['user_id']}> — {wins} {win_word} (${net:,.2f} net)")
+        lines.append(f"{i}. <@{row['user_id']}> — {wins} {win_word} ({formatting.format_dollars(net)} net)")
     if len(rows) > MAX_LEADERBOARD_ROWS:
         lines.append(f"...and {len(rows) - MAX_LEADERBOARD_ROWS} more")
     embed.add_field(name="🏆 Season Leaderboard", value="\n".join(lines)[:1024], inline=False)
@@ -161,7 +161,7 @@ async def _build_embed(bot, week) -> discord.Embed:
             crown = " 🏆" if row["is_weekly_winner"] else ""
             count = len(repository.list_parlays_for_user_week(bot.conn, row["user_id"], week["id"]))
             lines.append(
-                f"{i}. <@{row['user_id']}> — ${row['current_balance']:,.2f} ({count} parlay(s)){crown}"
+                f"{i}. <@{row['user_id']}> — {formatting.format_dollars(row['current_balance'])} ({count} parlay(s)){crown}"
             )
         embed.add_field(
             name=f"Standings ({len(standings)} opted in)", value="\n".join(lines)[:1024], inline=False
@@ -189,7 +189,7 @@ async def _build_embed(bot, week) -> discord.Embed:
             for i, parlay in enumerate(parlays, start=1):
                 legs = repository.list_legs_with_games(bot.conn, parlay["id"])
                 markers = "".join(formatting.LEG_RESULT_MARKERS.get(leg["result"], "⏳") for leg in legs)
-                wager = f"${parlay['wager_dollars']:,.2f}" if parlay["wager_dollars"] is not None else "-"
+                wager = f"{formatting.format_dollars(parlay['wager_dollars'])}" if parlay["wager_dollars"] is not None else "-"
                 payout_text, status_label = formatting.format_payout_and_status(parlay)
                 amount = (
                     parlay["actual_payout_dollars"]
@@ -202,7 +202,7 @@ async def _build_embed(bot, week) -> discord.Embed:
             parlay_word = "parlay" if len(parlays) == 1 else "parlays"
             payout_word = "payout" if all(p["status"] == "graded" for p in parlays) else "potential payout"
             embed.add_field(
-                name=f"{username} — {len(parlays)} {parlay_word} → ${total_payout:,.2f} {payout_word}",
+                name=f"{username} — {len(parlays)} {parlay_word} → {formatting.format_dollars(total_payout)} {payout_word}",
                 value="\n".join(lines)[:1024],
                 inline=False,
             )

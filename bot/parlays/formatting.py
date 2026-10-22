@@ -1,6 +1,16 @@
+from decimal import ROUND_HALF_UP, Decimal
+
 from bot.parlays import selections
 
 LEG_RESULT_MARKERS = {"win": "✅", "loss": "❌", "push": "➖", "pending": "⏳"}
+
+
+def format_dollars(amount: float) -> str:
+    """Whole dollars with thousands separators, e.g. $14,114 or -$150 - the
+    bot tracks cents internally but never shows them. Rounds halves up
+    ($2.50 -> $3) rather than Python's default round-half-to-even."""
+    whole = int(Decimal(str(amount)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return f"-${-whole:,}" if whole < 0 else f"${whole:,}"
 
 
 def format_price(price: int | None) -> str:
@@ -33,9 +43,9 @@ def format_payout_and_status(parlay) -> tuple[str, str]:
     once graded, potential payout + the raw status (submitted/locked) while
     still pending. Shared by the status panel and /parlays so both agree."""
     if parlay["status"] == "graded":
-        return f"${parlay['actual_payout_dollars']:,.2f} payout", parlay["result"].upper()
+        return f"{format_dollars(parlay['actual_payout_dollars'])} payout", parlay["result"].upper()
     potential = (
-        f"${parlay['potential_payout_dollars']:,.2f}"
+        f"{format_dollars(parlay['potential_payout_dollars'])}"
         if parlay["potential_payout_dollars"] is not None
         else "-"
     )
