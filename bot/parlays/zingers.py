@@ -1,4 +1,5 @@
 import random
+from collections.abc import Collection
 
 _ZINGERS: dict[str, list[str]] = {
     "purdue": [
@@ -88,7 +89,8 @@ def get_flair_reaction(team: str | None, username: str, choice_fn=random.choice)
 
 
 # The group signed off on these being crass (2026-10). Keep them aimed at
-# people's bets, records and decision-making - never slurs or who someone is.
+# people's bets, records and decision-making - never slurs (including
+# "retard") or who someone is, and don't assume the target's gender.
 _KNOCKOUT_ZINGERS = [
     "{user} rode {bet} straight into a fucking wall.",
     "{bet}?? {user}, what the fuck were you thinking.",
@@ -100,6 +102,16 @@ _KNOCKOUT_ZINGERS = [
     "That {bet} pick just shit the bed and {user} is lying in it.",
     "{user} really thought {bet} was a lock. It was a fucking anchor.",
     "{bet} - the last words of {user}'s dumbass parlay.",
+    "RIP {user}'s parlay. Murdered in cold blood by {bet}, a pick only a braindead idiot would make.",
+    "{user} saw {bet} and thought 'free money.' Smooth-brained behavior.",
+    "Congrats {user}, {bet} just made you the dumbest motherfucker in the channel.",
+    "{bet} lost and {user}'s parlay is now a fucking crime scene.",
+    "Who the fuck let {user} bet {bet}? Somebody take the phone away.",
+    "{user} trusted {bet}. Room-temperature IQ shit.",
+    "{bet} folded like a lawn chair and took {user}'s whole dumbass parlay with it.",
+    "Pour one out for {user}. Actually don't, {bet} was too stupid to mourn.",
+    "{user} picked {bet} with their whole chest and got kicked square in the teeth.",
+    "Breaking: local dumbass {user} loses parlay on {bet}. More at never.",
 ]
 
 
@@ -118,21 +130,63 @@ _TRASH_TALK_BUSTED_BET = [
     "{user}, {bet}? Were you drunk or just like this?",
     "Somewhere a sportsbook is framing {user}'s {bet} ticket and laughing its ass off.",
     "{user} still hasn't apologized to the group for {bet}. Disgraceful.",
+    "Never forget that {user} looked at {bet} and said 'yeah, that one.' Braindead.",
+    "{bet}. That's the tweet. That's {user}'s whole fucking legacy.",
+    "{user} bet {bet} sober. Let that sink in.",
+    "Scientists are still studying how {user} came up with {bet}. Early results: dumbass.",
+    "{user}'s {bet} pick should be studied in schools as a warning.",
+    "If you ever feel stupid, remember {user} bet {bet}.",
+    "{user}, the {bet} pick wasn't a bet, it was a cry for help.",
+    "Nobody bring up {bet} around {user}. Actually, fuck it, everyone bring it up.",
+    "{user} lost on {bet} and somehow still thinks they're good at this.",
+    "Imagine having a brain and still betting {bet}. {user} doesn't have to imagine the second part.",
+    "{bet} was the worst pick in this channel since {user}'s last one.",
+    "{user} put {bet} in a parlay on purpose. Not a typo. On purpose.",
+    "The {bet} pick was so bad the books sent {user} a sympathy card.",
+    "{user} and {bet}: a love story where the dumbass gets fucked at the end.",
+    "Every time someone says 'lock of the week,' think of {user} and {bet}. Then laugh.",
 ]
 _TRASH_TALK_LAST_PLACE = [
     "{user} is dead fucking last at {balance}. Delete the app.",
     "Somebody check on {user}, rotting in last place at {balance}.",
     "{user} at {balance} and still running their mouth with picks. Shut the fuck up.",
+    "{user} finished last at {balance}. A coin flip would've done better, you smooth-brained fuck.",
+    "Last place, {balance}. {user}, that's not bad luck, that's being a dumbass with consistency.",
+    "{user} at {balance}: proof that confidence and intelligence are unrelated.",
+    "Dead last at {balance}. {user}, the floor is down there, keep digging.",
+    "{user} took $1,000 and turned it into {balance}. Fucking magician.",
+    "{balance} and last place. {user}, your picks should come with a warning label.",
+    "{user} is so far in last at {balance} they need a map to find the rest of us.",
+    "Bottom of the barrel at {balance}. {user}, we love you, but you're a fucking idiot.",
+    "{user} at {balance}. The group chat's designated cautionary tale.",
 ]
 _TRASH_TALK_LEADER = [
     "{user} on top at {balance} acting like a genius. Lucky as shit and it won't last.",
     "Enjoy first place while it lasts, {user}. The books are coming for your ass.",
     "{user} up to {balance} and already insufferable. Somebody humble this asshole.",
+    "{user} is in first at {balance}. Even a broken clock, you lucky fuck.",
+    "First place {user} at {balance} about to start giving everyone 'advice.' Nobody asked.",
+    "{user} up top at {balance}. A blind squirrel found a nut and won't shut up about it.",
+    "{balance} and first place. {user}, don't get cocky, you're still a dumbass.",
+    "{user} won the week at {balance}. Somebody check their phone for a cheat code.",
+    "{user} on top at {balance}, peaking way too fucking early.",
+    "Look at {user} at {balance}, strutting like they didn't hit on pure dumb luck.",
+    "{user} is leading at {balance}. The regression is going to be fucking beautiful.",
+    "First place {user}. Screenshot it, it's never happening again.",
 ]
 _TRASH_TALK_NO_BETS = [
     "{user} opted in and hasn't placed a single bet. Scared money don't make money, you spineless fuck.",
     "{user} sitting on {balance} like it's a fucking 401k. Bet something, coward.",
     "{user} joined just to watch. Get the fuck in the game.",
+    "{user} opted in and froze like a deer in headlights. Pick a fucking team.",
+    "Zero bets from {user}. Bold strategy, losing by not even showing up.",
+    "{user} has {balance} and zero guts. Place a bet.",
+    "{user} is just here for the vibes. Nobody invited the vibes, bet something.",
+    "Still no bets from {user}. Did you forget how to read odds, dumbass?",
+    "{user} opted in and then ghosted. Typical.",
+    "{user}, the money isn't going to bet itself, you absolute turnip.",
+    "{user} holding {balance} like a squirrel with a nut. Spend it, coward.",
+    "Opted in, bet nothing. {user} is the human equivalent of a participation trophy.",
 ]
 _TRASH_TALK_GENERIC = [
     "{user} has the betting instincts of a drunk raccoon.",
@@ -141,6 +195,40 @@ _TRASH_TALK_GENERIC = [
     "If {user} likes a team this week, hammer the other side. Free fucking money.",
     "{user} picks games like they're throwing darts blindfolded. And missing the board.",
     "{user} couldn't hit a parlay if the games were already over.",
+    "{user} is the reason sportsbooks have such nice buildings.",
+    "{user} has a room-temperature IQ and a sub-zero win rate.",
+    "{user} reads the injury report like it's in Latin. Braindead.",
+    "{user} thinks a moneyline is something you stand in at the bank.",
+    "{user}'s picks are so bad they should be illegal.",
+    "{user} is smooth-brained enough to bet a team because the jerseys look cool.",
+    "Fade {user}. Always fade {user}. Fading {user} is a retirement plan.",
+    "{user} could lose a bet on a game that already finished.",
+    "{user} has never met a bad line they didn't fucking love.",
+    "{user} bets like someone who just learned what football is.",
+    "{user} watches one highlight and thinks they're a fucking scout.",
+    "{user}'s betting record is a crime against math.",
+    "{user} confidently wrong is still the most reliable thing in this channel.",
+    "{user}, the parlay gods aren't punishing you. You're just a dumbass.",
+    "{user}'s hot take this week will age like milk in a hot car.",
+    "{user} has the strategic mind of a golden retriever chasing a car.",
+    "{user} is one bad parlay away from a GoFundMe.",
+    "Every time {user} says 'trust me,' a bookie gets their wings.",
+    "{user} couldn't handicap a game between Alabama and a high school JV team.",
+    "{user}'s picks have the structural integrity of a wet paper bag.",
+    "{user} bets with their heart, and their heart is a fucking idiot.",
+    "{user}, the spread is not a suggestion, you braindead fuck.",
+    "{user} treats every Saturday like a hostage negotiation with their own bankroll.",
+    "{user} is living proof you can lose fake money and still feel real shame.",
+    "{user} doesn't do research, they do vibes and regret.",
+    "{user} picks underdogs like someone who's never watched a fourth quarter.",
+    "{user} thinks 'the over' is a lifestyle. It's not, dumbass.",
+    "If {user} played quarterback they'd throw picks to their own bench.",
+    "{user}'s betting advice is a great way to lose friends and money.",
+    "{user} has the football IQ of a traffic cone.",
+    "{user} would bet the under on their own birthday.",
+    "{user}, delete your picks. Delete your account. Delete the whole fucking thing.",
+    "{user} is the human equivalent of a missed extra point.",
+    "{user} is what happens when confidence has no supervision.",
 ]
 
 
@@ -151,12 +239,15 @@ def get_trash_talk(
     has_bets: bool,
     is_last: bool,
     is_leader: bool,
+    recent: Collection[str] = (),
     choice_fn=random.choice,
-) -> str:
+) -> tuple[str, str]:
     """An unprompted jab at one player, drawn from whichever of their week's
     sore spots apply (a busted bet named outright, last place, first place,
     opted in but never bet) plus a generic pool, so it reads like it was
-    written about them rather than at a random name."""
+    written about them rather than at a random name. Skips any template in
+    `recent` unless a category has nothing else left. Returns (message,
+    template) so the caller can remember which line it used."""
     categories = [_TRASH_TALK_GENERIC]
     if busted_bets:
         categories.append(_TRASH_TALK_BUSTED_BET)
@@ -166,6 +257,8 @@ def get_trash_talk(
         categories.append(_TRASH_TALK_LAST_PLACE)
     if is_leader:
         categories.append(_TRASH_TALK_LEADER)
-    template = choice_fn(choice_fn(categories))
+    category = choice_fn(categories)
+    fresh = [template for template in category if template not in recent]
+    template = choice_fn(fresh or category)
     bet = choice_fn(busted_bets) if busted_bets else ""
-    return template.format(user=mention, balance=balance_text, bet=bet)
+    return template.format(user=mention, balance=balance_text, bet=bet), template

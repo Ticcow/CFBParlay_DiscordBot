@@ -77,20 +77,46 @@ def test_get_knockout_zinger_has_multiple_distinct_lines():
 
 def test_get_trash_talk_only_draws_from_categories_that_apply():
     seen = {
-        zingers.get_trash_talk("<@1>", "$0", [], has_bets=True, is_last=False, is_leader=False)
+        zingers.get_trash_talk("<@1>", "$0", [], has_bets=True, is_last=False, is_leader=False)[0]
         for _ in range(40)
     }
     assert seen <= {line.format(user="<@1>", balance="$0", bet="") for line in zingers._TRASH_TALK_GENERIC}
 
 
 def test_get_trash_talk_fills_in_the_bet_and_balance():
-    busted = zingers.get_trash_talk(
+    busted, _ = zingers.get_trash_talk(
         "<@1>", "$0", ["UCF -41.5 (-110)"], has_bets=True, is_last=False, is_leader=False,
         choice_fn=lambda options: options[-1],
     )
-    last = zingers.get_trash_talk(
+    last, _ = zingers.get_trash_talk(
         "<@1>", "$12", [], has_bets=True, is_last=True, is_leader=False,
         choice_fn=lambda options: options[-1],
     )
     assert "UCF -41.5 (-110)" in busted
     assert "$12" in last
+
+
+def test_get_trash_talk_skips_recently_used_lines():
+    recent = zingers._TRASH_TALK_GENERIC[:-1]
+    message, template = zingers.get_trash_talk(
+        "<@1>", "$0", [], has_bets=True, is_last=False, is_leader=False, recent=recent
+    )
+    assert template == zingers._TRASH_TALK_GENERIC[-1]
+
+
+def test_get_trash_talk_reuses_lines_once_a_category_is_exhausted():
+    message, template = zingers.get_trash_talk(
+        "<@1>", "$0", [], has_bets=True, is_last=False, is_leader=False,
+        recent=zingers._TRASH_TALK_GENERIC,
+    )
+    assert template in zingers._TRASH_TALK_GENERIC
+
+
+def test_roast_pools_are_big_and_have_no_duplicates():
+    pools = [
+        zingers._KNOCKOUT_ZINGERS, zingers._TRASH_TALK_BUSTED_BET, zingers._TRASH_TALK_LAST_PLACE,
+        zingers._TRASH_TALK_LEADER, zingers._TRASH_TALK_NO_BETS, zingers._TRASH_TALK_GENERIC,
+    ]
+    for pool in pools:
+        assert len(pool) >= 12
+        assert len(set(pool)) == len(pool)

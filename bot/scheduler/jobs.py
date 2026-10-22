@@ -1,3 +1,4 @@
+import json
 import logging
 import random
 from datetime import date, datetime
@@ -268,6 +269,10 @@ TRASH_TALK_FAVORITE_ODDS = 0.5
 TRASH_TALK_FIRST_SLOT_MINUTES = 11 * 60
 TRASH_TALK_LAST_SLOT_MINUTES = 21 * 60 + 30
 _TRASH_TALK_STATE_KEY = "trash_talk_last_posted_on"
+# the last N roast templates used (button presses included), skipped when
+# picking the next one so the same line doesn't come right back around
+TRASH_TALK_RECENT_LIMIT = 30
+_TRASH_TALK_RECENT_KEY = "trash_talk_recent_templates"
 
 
 def trash_talk_slot_odds(now_eastern: datetime) -> float:
@@ -331,15 +336,19 @@ async def post_trash_talk(bot, random_fn=random.random, choice_fn=random.choice)
     # never when the whole field is tied
     balances = [r["current_balance"] for r in standings]
     ranked = repository.is_week_finalized(bot.conn, week["id"]) and max(balances) != min(balances)
-    message = zingers.get_trash_talk(
+    recent = json.loads(repository.get_state(bot.conn, _TRASH_TALK_RECENT_KEY) or "[]")
+    message, template = zingers.get_trash_talk(
         f"<@{target}>",
         formatting.format_dollars(row["current_balance"]),
         busted_bets,
         has_bets=bool(parlays),
         is_last=ranked and row["current_balance"] == min(balances),
         is_leader=ranked and row["current_balance"] == max(balances),
+        recent=recent,
         choice_fn=choice_fn,
     )
+    recent = [t for t in recent if t != template] + [template]
+    repository.set_state(bot.conn, _TRASH_TALK_RECENT_KEY, json.dumps(recent[-TRASH_TALK_RECENT_LIMIT:]))
     await bot.announce(message)
     return True
 

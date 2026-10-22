@@ -787,3 +787,14 @@ async def test_post_trash_talk_does_nothing_with_nobody_opted_in(conn):
 
     assert await jobs.post_trash_talk(bot) is False
     assert bot.announcements == []
+
+
+async def test_post_trash_talk_doesnt_repeat_a_line_until_the_pool_runs_dry(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(conn, week_id, user_id=1, home="Texas", away="Ohio State")
+
+    for _ in range(jobs.TRASH_TALK_RECENT_LIMIT):
+        await jobs.post_trash_talk(bot)
+
+    assert len(set(bot.announcements)) == jobs.TRASH_TALK_RECENT_LIMIT
