@@ -108,3 +108,61 @@ def get_knockout_zinger(mention: str, bet_description: str, choice_fn=random.cho
     pick summary like "Texas -6.5 (-110)" (see
     formatting.format_selection_button_label)."""
     return choice_fn(_KNOCKOUT_ZINGERS).format(user=mention, bet=bet_description)
+
+
+_TRASH_TALK_BUSTED_BET = [
+    "{user} put real (fake) money on {bet}. Still not over it.",
+    "Daily reminder that {user} bet {bet}. That's it, that's the post.",
+    "{user}, {bet}? Who hurt you?",
+    "Thoughts and prayers to {user}'s bankroll after that {bet} pick.",
+    "Somewhere a sportsbook is framing {user}'s {bet} ticket.",
+]
+_TRASH_TALK_LAST_PLACE = [
+    "{user} is dead last at {balance}. Parlays aren't a personality, champ.",
+    "Somebody check on {user}, sitting at {balance} in last place.",
+    "{user} at {balance} and still giving out picks like anyone asked.",
+]
+_TRASH_TALK_LEADER = [
+    "{user} on top at {balance} acting like a genius. Regression is undefeated.",
+    "Enjoy first place while it lasts, {user}. The books always collect.",
+    "{user} up to {balance} and already shopping for a yacht. Relax.",
+]
+_TRASH_TALK_NO_BETS = [
+    "{user} opted in and hasn't placed a single bet. Scared money don't make money.",
+    "{user} out here holding {balance} like it's a 401k. Bet something.",
+    "{user} joined the game just to watch. Bold strategy.",
+]
+_TRASH_TALK_GENERIC = [
+    "{user} has the betting instincts of a coin that landed on its edge.",
+    "Every time {user} locks a pick, Vegas sends a thank-you card.",
+    "{user}'s whole strategy is vibes and poor decisions.",
+    "If {user} likes a team this week, take the other side. Free money.",
+    "{user} handicaps games by reading tea leaves in the dark.",
+]
+
+
+def get_trash_talk(
+    mention: str,
+    balance_text: str,
+    busted_bets: list[str],
+    has_bets: bool,
+    is_last: bool,
+    is_leader: bool,
+    choice_fn=random.choice,
+) -> str:
+    """An unprompted jab at one player, drawn from whichever of their week's
+    sore spots apply (a busted bet named outright, last place, first place,
+    opted in but never bet) plus a generic pool, so it reads like it was
+    written about them rather than at a random name."""
+    categories = [_TRASH_TALK_GENERIC]
+    if busted_bets:
+        categories.append(_TRASH_TALK_BUSTED_BET)
+    if not has_bets:
+        categories.append(_TRASH_TALK_NO_BETS)
+    if is_last:
+        categories.append(_TRASH_TALK_LAST_PLACE)
+    if is_leader:
+        categories.append(_TRASH_TALK_LEADER)
+    template = choice_fn(choice_fn(categories))
+    bet = choice_fn(busted_bets) if busted_bets else ""
+    return template.format(user=mention, balance=balance_text, bet=bet)

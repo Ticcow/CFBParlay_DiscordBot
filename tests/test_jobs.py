@@ -5,7 +5,7 @@ import pytest
 
 from bot.integrations.cfbd_client import CalendarWeek, CfbdGame, RankedTeam
 from bot.integrations.odds_client import OddsEvent
-from bot.parlays import grading, repository, standings, timeutils
+from bot.parlays import grading, repository, standings, timeutils, zingers
 from bot.scheduler import jobs
 
 FIXED_NOW = datetime(2026, 8, 28, tzinfo=timezone.utc)
@@ -638,3 +638,131 @@ async def test_pregame_reminder_noop_once_kickoff_has_passed(conn):
     await jobs.pregame_reminder_job(bot)
 
     assert bot.announcements == []
+
+
+# --- daily trash talk ---
+
+HOWLER = jobs.TRASH_TALK_FAVORITE_USER_ID
+EASTERN_8PM = datetime(2026, 9, 2, 0, 0, tzinfo=timezone.utc)  # Tue 9/1 8pm ET
+
+
+def _eastern(hour, minute):
+    return datetime(2026, 9, 1, hour, minute, tzinfo=jobs.EASTERN)
+
+
+def test_trash_talk_slot_odds_spread_one_post_evenly_across_the_window():
+    assert jobs.trash_talk_slot_odds(_eastern(10, 30)) == 0
+    assert jobs.trash_talk_slot_odds(_eastern(22, 0)) == 0
+    assert jobs.trash_talk_slot_odds(_eastern(11, 0)) == 1 / 22
+    assert jobs.trash_talk_slot_odds(_eastern(21, 0)) == 1 / 2
+    assert jobs.trash_talk_slot_odds(_eastern(21, 30)) == 1  # last slot always fires
+
+
+def test_pick_trash_talk_target_gives_howler_half_the_picks():
+    first = lambda options: options[0]
+    assert jobs.pick_trash_talk_target([1, HOWLER, 2], lambda: 0.49, first) == HOWLER
+    assert jobs.pick_trash_talk_target([1, HOWLER, 2], lambda: 0.5, first) == 1
+    assert jobs.pick_trash_talk_target([HOWLER], lambda: 0.99, first) == HOWLER
+    assert jobs.pick_trash_talk_target([1, 2], lambda: 0.0, first) == 1
+
+
+async def test_trash_talk_job_posts_once_per_day_at_the_picked_player(conn, monkeypatch):
+    monkeypatch.setattr(timeutils, "utc_now", lambda: EASTERN_8PM)
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+    repository.opt_in(conn, user_id=HOWLER, week_id=week_id)
+
+    always = lambda: 0.0
+    await jobs.trash_talk_job(bot, random_fn=always, choice_fn=lambda options: options[0])
+    await jobs.trash_talk_job(bot, random_fn=always, choice_fn=lambda options: options[0])
+
+    assert len(bot.announcements) == 1
+    assert f"<@{HOWLER}>" in bot.announcements[0]
+
+
+async def test_trash_talk_job_waits_for_its_slot(conn, monkeypatch):
+    monkeypatch.setattr(timeutils, "utc_now", lambda: EASTERN_8PM)
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+
+    await jobs.trash_talk_job(bot, random_fn=lambda: 0.99)  # 8pm slot odds are 1/4
+
+    assert bot.announcements == []
+
+
+async def test_trash_talk_job_skips_without_using_up_the_day_when_nobody_opted_in(conn, monkeypatch):
+    monkeypatch.setattr(timeutils, "utc_now", lambda: EASTERN_8PM)
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+
+    await jobs.trash_talk_job(bot, random_fn=lambda: 0.0)
+    repository.opt_in(conn, user_id=1, week_id=week_id)
+    await jobs.trash_talk_job(bot, random_fn=lambda: 0.0, choice_fn=lambda options: options[0])
+
+    assert len(bot.announcements) == 1
+
+
+async def test_trash_talk_job_can_name_the_targets_busted_bet(conn, monkeypatch):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(conn, week_id, user_id=1, home="Texas", away="Ohio State")
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 10, 24)]
+    )
+    grading.grade_pending_legs(conn, week_id)
+    monkeypatch.setattr(timeutils, "utc_now", lambda: EASTERN_8PM)
+    bot = FakeBot(conn)
+
+    def pick_busted_category(options):
+        if zingers._TRASH_TALK_BUSTED_BET in options:
+            return zingers._TRASH_TALK_BUSTED_BET
+        return options[0]
+
+    await jobs.trash_talk_job(bot, random_fn=lambda: 0.0, choice_fn=pick_busted_category)
+
+    assert "Texas (-150)" in bot.announcements[0]
+
+
+async def test_trash_talk_job_never_ranks_players_mid_week(conn, monkeypatch):
+    # everyone all-in mid-week sits at $0 - nobody is "last place" yet
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(conn, week_id, user_id=1, home="Texas", away="Ohio State")
+    repository.opt_in(conn, user_id=2, week_id=week_id)
+    monkeypatch.setattr(timeutils, "utc_now", lambda: EASTERN_8PM)
+    offered = []
+
+    def record_categories(options):
+        if options and isinstance(options[0], list):
+            offered.extend(options)
+        return options[0]
+
+    bot = FakeBot(conn)
+    await jobs.trash_talk_job(bot, random_fn=lambda: 0.0, choice_fn=record_categories)
+
+    assert bot.announcements
+    assert zingers._TRASH_TALK_LAST_PLACE not in offered
+    assert zingers._TRASH_TALK_LEADER not in offered
+
+
+async def test_trash_talk_job_calls_out_last_place_once_the_week_is_settled(conn, monkeypatch):
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    _setup_submitted_parlay_with_one_leg(conn, week_id, user_id=1, home="Texas", away="Ohio State")
+    repository.opt_in(conn, user_id=2, week_id=week_id)
+    repository.upsert_games(
+        conn, week_id, [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 24, 17)]
+    )
+    grading.grade_week(conn, week_id)
+    standings.finalize_week(conn, week_id)  # user 1 won $167, user 2 never bet -> $0
+    monkeypatch.setattr(timeutils, "utc_now", lambda: EASTERN_8PM)
+
+    def pick_user_2_and_last_place(options):
+        if zingers._TRASH_TALK_LAST_PLACE in options:
+            return zingers._TRASH_TALK_LAST_PLACE
+        return 2 if 2 in options else options[0]
+
+    bot = FakeBot(conn)
+    await jobs.trash_talk_job(bot, random_fn=lambda: 0.0, choice_fn=pick_user_2_and_last_place)
+
+    assert "<@2>" in bot.announcements[0]
+    assert "$0" in bot.announcements[0]

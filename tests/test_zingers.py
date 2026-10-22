@@ -73,3 +73,24 @@ def test_get_knockout_zinger_embeds_the_mention_and_bet_verbatim():
 def test_get_knockout_zinger_has_multiple_distinct_lines():
     seen = {zingers.get_knockout_zinger("<@123>", "Texas -6.5 (-110)") for _ in range(30)}
     assert len(seen) > 1
+
+
+def test_get_trash_talk_only_draws_from_categories_that_apply():
+    seen = {
+        zingers.get_trash_talk("<@1>", "$0", [], has_bets=True, is_last=False, is_leader=False)
+        for _ in range(40)
+    }
+    assert seen <= {line.format(user="<@1>", balance="$0", bet="") for line in zingers._TRASH_TALK_GENERIC}
+
+
+def test_get_trash_talk_fills_in_the_bet_and_balance():
+    busted = zingers.get_trash_talk(
+        "<@1>", "$0", ["UCF -41.5 (-110)"], has_bets=True, is_last=False, is_leader=False,
+        choice_fn=lambda options: options[-1],
+    )
+    last = zingers.get_trash_talk(
+        "<@1>", "$12", [], has_bets=True, is_last=True, is_leader=False,
+        choice_fn=lambda options: options[-1],
+    )
+    assert "UCF -41.5 (-110)" in busted
+    assert "$12" in last

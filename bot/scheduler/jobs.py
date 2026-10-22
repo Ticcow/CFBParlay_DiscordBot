@@ -1,4 +1,5 @@
 import logging
+import random
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -260,6 +261,81 @@ async def evening_digest_job(bot) -> None:
     await bot.announce("\n".join(lines))
 
 
+# Daily unprompted trash talk: one post per day at a random half-hour between
+# 11:00 and 21:30 Eastern, at an opted-in player - Howler gets half the picks.
+TRASH_TALK_FAVORITE_USER_ID = 396532921856688128  # Howler (.triinity)
+TRASH_TALK_FAVORITE_ODDS = 0.5
+TRASH_TALK_FIRST_SLOT_MINUTES = 11 * 60
+TRASH_TALK_LAST_SLOT_MINUTES = 21 * 60 + 30
+_TRASH_TALK_STATE_KEY = "trash_talk_last_posted_on"
+
+
+def trash_talk_slot_odds(now_eastern: datetime) -> float:
+    """Chance this half-hour slot should be the day's trash-talk post: 1/(slots
+    left today, this one included), so exactly one slot fires per day and
+    every slot in the window is equally likely to be the one. 0 outside the
+    window."""
+    minutes = now_eastern.hour * 60 + now_eastern.minute
+    if not TRASH_TALK_FIRST_SLOT_MINUTES <= minutes <= TRASH_TALK_LAST_SLOT_MINUTES:
+        return 0.0
+    slots_left = (TRASH_TALK_LAST_SLOT_MINUTES - minutes) // 30 + 1
+    return 1 / slots_left
+
+
+def pick_trash_talk_target(user_ids: list[int], random_fn=random.random, choice_fn=random.choice) -> int:
+    others = [user_id for user_id in user_ids if user_id != TRASH_TALK_FAVORITE_USER_ID]
+    favorite_in = len(others) < len(user_ids)
+    if favorite_in and (not others or random_fn() < TRASH_TALK_FAVORITE_ODDS):
+        return TRASH_TALK_FAVORITE_USER_ID
+    return choice_fn(others)
+
+
+async def trash_talk_job(bot, random_fn=random.random, choice_fn=random.choice) -> None:
+    now = timeutils.utc_now()
+    today = _eastern_date(now).isoformat()
+    if repository.get_state(bot.conn, _TRASH_TALK_STATE_KEY) == today:
+        return
+    if random_fn() >= trash_talk_slot_odds(now.astimezone(EASTERN)):
+        return
+
+    week = repository.get_latest_week(bot.conn)
+    if week is None:
+        return
+    standings = repository.list_week_standings(bot.conn, week["id"])
+    if not standings:
+        return  # nobody opted in - try again in the next slot
+
+    target = pick_trash_talk_target([row["user_id"] for row in standings], random_fn, choice_fn)
+    row = next(r for r in standings if r["user_id"] == target)
+    parlays = [
+        p for p in repository.list_submitted_parlays_for_week(bot.conn, week["id"]) if p["user_id"] == target
+    ]
+    busted_bets = [
+        formatting.format_selection_button_label(
+            leg, leg["market"], leg["selection"], leg["line_value"], leg["price_american"]
+        )
+        for parlay in parlays
+        for leg in repository.list_legs_with_games(bot.conn, parlay["id"])
+        if leg["result"] == "loss"
+    ]
+    # mid-week a balance is just unwagered money (everyone all-in sits at $0),
+    # so first/last place only mean something once the week is settled - and
+    # never when the whole field is tied
+    balances = [r["current_balance"] for r in standings]
+    ranked = repository.is_week_finalized(bot.conn, week["id"]) and max(balances) != min(balances)
+    message = zingers.get_trash_talk(
+        f"<@{target}>",
+        formatting.format_dollars(row["current_balance"]),
+        busted_bets,
+        has_bets=bool(parlays),
+        is_last=ranked and row["current_balance"] == min(balances),
+        is_leader=ranked and row["current_balance"] == max(balances),
+        choice_fn=choice_fn,
+    )
+    repository.set_state(bot.conn, _TRASH_TALK_STATE_KEY, today)
+    await bot.announce(message)
+
+
 async def channel_cleanup_job(bot) -> int:
     return await status_panel.cleanup_channel(bot)
 
@@ -309,6 +385,7 @@ def register_jobs(bot) -> AsyncIOScheduler:
     scheduler.add_job(_guarded(bot, "poll_scores_daily", poll_scores), CronTrigger(hour=8))
     scheduler.add_job(_guarded(bot, "grade_week_fallback", grade_week_job), CronTrigger(day_of_week="sun", hour=8))
     scheduler.add_job(_guarded(bot, "evening_digest", evening_digest_job), CronTrigger(hour=19))
+    scheduler.add_job(_guarded(bot, "trash_talk", trash_talk_job), CronTrigger(minute="0,30"))
     scheduler.add_job(_guarded(bot, "api_usage_report", api_usage_report_job), CronTrigger(day=1, hour=9))
     scheduler.start()
     return scheduler
