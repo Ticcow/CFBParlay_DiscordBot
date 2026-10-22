@@ -62,7 +62,7 @@ def test_get_flair_reaction_has_variety_across_categories():
 
 
 def test_get_knockout_zinger_embeds_the_mention_and_bet_verbatim():
-    result = zingers.get_knockout_zinger(
+    result, _ = zingers.get_knockout_zinger(
         "<@123>", "Texas -6.5 (-110)", choice_fn=lambda options: options[0]
     )
     assert result == zingers._KNOCKOUT_ZINGERS[0].format(user="<@123>", bet="Texas -6.5 (-110)")
@@ -71,7 +71,7 @@ def test_get_knockout_zinger_embeds_the_mention_and_bet_verbatim():
 
 
 def test_get_knockout_zinger_has_multiple_distinct_lines():
-    seen = {zingers.get_knockout_zinger("<@123>", "Texas -6.5 (-110)") for _ in range(30)}
+    seen = {zingers.get_knockout_zinger("<@123>", "Texas -6.5 (-110)")[0] for _ in range(30)}
     assert len(seen) > 1
 
 
@@ -146,14 +146,49 @@ def test_get_trash_talk_can_pick_a_custom_line():
     custom_line = "{user} custom roast"
     message, template = zingers.get_trash_talk(
         "<@1>", "$0", [], has_bets=True, is_last=False, is_leader=False,
-        custom={"generic": [custom_line]}, choice_fn=lambda options: options[-1],
+        custom={"generic": [custom_line]}, random_fn=lambda: 0.0,
     )
     assert template == custom_line
     assert message == "<@1> custom roast"
 
 
 def test_get_knockout_zinger_can_pick_a_custom_line():
-    line = zingers.get_knockout_zinger(
-        "<@1>", "UCF -41.5 (-110)", ["{user} ate shit on {bet}"], choice_fn=lambda options: options[-1]
+    line, _ = zingers.get_knockout_zinger(
+        "<@1>", "UCF -41.5 (-110)", ["{user} ate shit on {bet}"], random_fn=lambda: 0.0
     )
     assert line == "<@1> ate shit on UCF -41.5 (-110)"
+
+
+def test_custom_lines_win_whenever_the_odds_roll_their_way():
+    custom = {"generic": ["{user} custom roast"]}
+    def roast(roll):
+        return zingers.get_trash_talk(
+            "<@1>", "$0", [], has_bets=True, is_last=False, is_leader=False,
+            custom=custom, random_fn=lambda: roll,
+        )[1]
+    assert roast(zingers.CUSTOM_ROAST_ODDS - 0.01) == "{user} custom roast"
+    assert roast(zingers.CUSTOM_ROAST_ODDS) in zingers._TRASH_TALK_GENERIC
+
+
+def test_custom_lines_only_count_when_their_category_applies():
+    # a "first place" custom line can't be used on someone who isn't leading
+    _, template = zingers.get_trash_talk(
+        "<@1>", "$0", [], has_bets=True, is_last=False, is_leader=False,
+        custom={"leader": ["{user} custom leader line"]}, random_fn=lambda: 0.0,
+    )
+    assert template in zingers._TRASH_TALK_GENERIC
+
+
+def test_a_small_custom_pool_rotates_instead_of_drying_up():
+    custom = {"generic": ["{user} one", "{user} two"]}
+    recent: list[str] = []
+    picks = []
+    for _ in range(6):
+        _, template = zingers.get_trash_talk(
+            "<@1>", "$0", [], has_bets=True, is_last=False, is_leader=False,
+            recent=recent, custom=custom, random_fn=lambda: 0.0,
+        )
+        picks.append(template)
+        recent = [t for t in recent if t != template] + [template]
+    assert picks[2:] == picks[:2] * 2  # alternates, never the same line twice in a row
+    assert set(picks) == {"{user} one", "{user} two"}

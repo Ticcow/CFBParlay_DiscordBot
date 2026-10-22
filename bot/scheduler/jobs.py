@@ -119,17 +119,25 @@ async def grade_week_job(bot) -> dict:
     return result
 
 
-def _elimination_message(entry: dict, custom_knockouts=()) -> str:
+def _elimination_message(entry: dict, custom_knockouts=(), recent=()) -> tuple[str, str]:
+    """The knockout post and the zinger template it used."""
     mention = f"<@{entry['user_id']}>"
     leg = entry["leg"]
     bet = formatting.format_selection_button_label(
         leg, leg["market"], leg["selection"], leg["line_value"], leg["price_american"]
     )
+    zinger, template = zingers.get_knockout_zinger(mention, bet, custom_knockouts, recent)
     return (
-        f"🥊 {mention}'s parlay has been KNOCKED OUT!\n"
-        f"{formatting.format_leg(leg)}\n"
-        f"{zingers.get_knockout_zinger(mention, bet, custom_knockouts)}"
+        f"🥊 {mention}'s parlay has been KNOCKED OUT!\n{formatting.format_leg(leg)}\n{zinger}",
+        template,
     )
+
+
+def _remember_recent(conn, key: str, recent: list[str], template: str) -> list[str]:
+    recent = [t for t in recent if t != template] + [template]
+    recent = recent[-TRASH_TALK_RECENT_LIMIT:]
+    repository.set_state(conn, key, json.dumps(recent))
+    return recent
 
 
 async def _grade_pending_and_announce(bot, week_id: int) -> list[dict]:
@@ -140,9 +148,12 @@ async def _grade_pending_and_announce(bot, week_id: int) -> list[dict]:
     announced no matter which one actually ends up grading it."""
     graded_legs = grading.grade_pending_legs(bot.conn, week_id)
     custom_knockouts = [row["template"] for row in repository.list_custom_roasts(bot.conn, "knockout")]
+    recent = json.loads(repository.get_state(bot.conn, _KNOCKOUT_RECENT_KEY) or "[]")
     for entry in graded_legs:
         if entry["result"] == "loss" and not entry["already_had_loss"]:
-            await bot.announce(_elimination_message(entry, custom_knockouts))
+            message, template = _elimination_message(entry, custom_knockouts, recent)
+            recent = _remember_recent(bot.conn, _KNOCKOUT_RECENT_KEY, recent, template)
+            await bot.announce(message)
     return graded_legs
 
 
@@ -274,6 +285,7 @@ _TRASH_TALK_STATE_KEY = "trash_talk_last_posted_on"
 # picking the next one so the same line doesn't come right back around
 TRASH_TALK_RECENT_LIMIT = 30
 _TRASH_TALK_RECENT_KEY = "trash_talk_recent_templates"
+_KNOCKOUT_RECENT_KEY = "knockout_recent_templates"
 
 
 def trash_talk_slot_odds(now_eastern: datetime) -> float:
@@ -355,9 +367,9 @@ async def post_trash_talk(bot, random_fn=random.random, choice_fn=random.choice)
         recent=recent,
         custom=_custom_roasts_by_category(bot.conn),
         choice_fn=choice_fn,
+        random_fn=random_fn,
     )
-    recent = [t for t in recent if t != template] + [template]
-    repository.set_state(bot.conn, _TRASH_TALK_RECENT_KEY, json.dumps(recent[-TRASH_TALK_RECENT_LIMIT:]))
+    _remember_recent(bot.conn, _TRASH_TALK_RECENT_KEY, recent, template)
     await bot.announce(message)
     return True
 

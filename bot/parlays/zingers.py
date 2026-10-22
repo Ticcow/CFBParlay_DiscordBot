@@ -1,6 +1,6 @@
 import random
 import string
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 _ZINGERS: dict[str, list[str]] = {
     "purdue": [
@@ -116,16 +116,47 @@ _KNOCKOUT_ZINGERS = [
 ]
 
 
-def get_knockout_zinger(
-    mention: str, bet_description: str, custom: Sequence[str] = (), choice_fn=random.choice
+# How often a roast comes from the group's own /admin add-roast lines instead
+# of the built-in bank, whenever at least one custom line fits the moment.
+CUSTOM_ROAST_ODDS = 0.75
+
+
+def _pick_least_recent(pool: Sequence[str], recent: Sequence[str], choice_fn) -> str:
+    """A random line from `pool` that isn't in `recent`; once every line has
+    been used recently, the one used longest ago - so a small pool (like a
+    handful of custom roasts) keeps rotating instead of drying up."""
+    fresh = [template for template in pool if template not in recent]
+    if fresh:
+        return choice_fn(fresh)
+    last_used = {template: i for i, template in enumerate(recent)}
+    return min(pool, key=lambda template: last_used[template])
+
+
+def _pick_template(
+    built_in: list[list[str]], custom: Sequence[str], recent: Sequence[str], choice_fn, random_fn
 ) -> str:
+    if custom and random_fn() < CUSTOM_ROAST_ODDS:
+        return _pick_least_recent(custom, recent, choice_fn)
+    return _pick_least_recent(choice_fn(built_in), recent, choice_fn)
+
+
+def get_knockout_zinger(
+    mention: str,
+    bet_description: str,
+    custom: Sequence[str] = (),
+    recent: Sequence[str] = (),
+    choice_fn=random.choice,
+    random_fn=random.random,
+) -> tuple[str, str]:
     """A one-liner roasting the specific pick that just busted a parlay -
     mention should be a Discord mention string like "<@123>" so it renders
     inline as a real ping rather than plain text, and bet_description a short
     pick summary like "Texas -6.5 (-110)" (see
-    formatting.format_selection_button_label). `custom` adds knockout lines
-    from /admin add-roast."""
-    return choice_fn(_KNOCKOUT_ZINGERS + list(custom)).format(user=mention, bet=bet_description)
+    formatting.format_selection_button_label). `custom` lines (from /admin
+    add-roast) are preferred per CUSTOM_ROAST_ODDS; anything in `recent` is
+    skipped while possible. Returns (line, template)."""
+    template = _pick_template([_KNOCKOUT_ZINGERS], custom, recent, choice_fn, random_fn)
+    return template.format(user=mention, bet=bet_description), template
 
 
 _TRASH_TALK_BUSTED_BET = [
@@ -243,33 +274,30 @@ def get_trash_talk(
     has_bets: bool,
     is_last: bool,
     is_leader: bool,
-    recent: Collection[str] = (),
+    recent: Sequence[str] = (),
     custom: Mapping[str, Sequence[str]] = {},
     choice_fn=random.choice,
+    random_fn=random.random,
 ) -> tuple[str, str]:
     """An unprompted jab at one player, drawn from whichever of their week's
     sore spots apply (a busted bet named outright, last place, first place,
     opted in but never bet) plus a generic pool, so it reads like it was
-    written about them rather than at a random name. Skips any template in
-    `recent` unless a category has nothing else left. `custom` adds lines
-    from /admin add-roast, keyed by category name. Returns (message,
-    template) so the caller can remember which line it used."""
-
-    def pool(category: str) -> list[str]:
-        return ROAST_CATEGORIES[category][0] + list(custom.get(category, ()))
-
-    categories = [pool("generic")]
+    written about them rather than at a random name. `custom` lines from
+    /admin add-roast (keyed by category) are preferred per CUSTOM_ROAST_ODDS
+    when any fit; anything in `recent` is skipped while possible. Returns
+    (message, template) so the caller can remember which line it used."""
+    applicable = ["generic"]
     if busted_bets:
-        categories.append(pool("busted_bet"))
+        applicable.append("busted_bet")
     if not has_bets:
-        categories.append(pool("no_bets"))
+        applicable.append("no_bets")
     if is_last:
-        categories.append(pool("last_place"))
+        applicable.append("last_place")
     if is_leader:
-        categories.append(pool("leader"))
-    category = choice_fn(categories)
-    fresh = [template for template in category if template not in recent]
-    template = choice_fn(fresh or category)
+        applicable.append("leader")
+    built_in = [ROAST_CATEGORIES[category][0] for category in applicable]
+    custom_lines = [line for category in applicable for line in custom.get(category, ())]
+    template = _pick_template(built_in, custom_lines, recent, choice_fn, random_fn)
     bet = choice_fn(busted_bets) if busted_bets else ""
     return template.format(user=mention, balance=balance_text, bet=bet), template
 

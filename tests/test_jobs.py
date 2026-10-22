@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -806,7 +807,7 @@ async def test_post_trash_talk_uses_custom_roasts(conn):
     _setup_submitted_parlay_with_one_leg(conn, week_id, user_id=1, home="Texas", away="Ohio State")
     repository.add_custom_roast(conn, "generic", "{user} custom-only line", added_by=7)
 
-    await jobs.post_trash_talk(bot, choice_fn=lambda options: options[-1])
+    await jobs.post_trash_talk(bot, random_fn=lambda: 0.0)
 
     assert bot.announcements == ["<@1> custom-only line"]
 
@@ -819,10 +820,35 @@ async def test_knockout_alert_can_use_a_custom_knockout_roast(conn, monkeypatch)
     real_zinger = zingers.get_knockout_zinger
     monkeypatch.setattr(
         zingers, "get_knockout_zinger",
-        lambda mention, bet, custom=(): real_zinger(mention, bet, custom, choice_fn=lambda o: o[-1]),
+        lambda mention, bet, custom=(), recent=(): real_zinger(mention, bet, custom, recent, random_fn=lambda: 0.0),
     )
     bot.cfbd.games = [CfbdGame(1, "Texas", "Ohio State", "2026-08-29T19:00:00Z", "final", 10, 24)]
 
     await jobs.poll_scores(bot)
 
     assert "<@42> custom knockout on Texas (-150)" in bot.announcements[0]
+
+
+async def test_knockout_alerts_dont_repeat_recent_lines(conn):
+    bot = FakeBot(conn)
+    week_id = repository.upsert_week(conn, 2026, 1, "regular")
+    games = [CfbdGame(i, f"Home{i}", f"Away{i}", "2026-08-29T19:00:00Z", "scheduled", None, None) for i in range(1, 9)]
+    repository.upsert_games(conn, week_id, games)
+    for i, game in enumerate(games, start=1):
+        row, _ = repository.find_game_by_teams(conn, week_id, game.home_team, game.away_team)
+        event = OddsEvent(game.home_team, game.away_team, game.start_time_utc, "draftkings", moneyline_home=-150, moneyline_away=130)
+        repository.insert_odds_snapshot(conn, row["id"], event, flipped=False)
+        snapshot = repository.get_latest_odds_snapshot(conn, row["id"])
+        participant = repository.opt_in(conn, user_id=i, week_id=week_id)
+        parlay_id = repository.start_parlay(conn, i, week_id)
+        repository.add_leg(conn, parlay_id, row["id"], snapshot["id"], "moneyline", "home", None, -150)
+        repository.submit_parlay(conn, parlay_id, participant["id"], 100.0, 166.67)
+    bot.cfbd.games = [
+        CfbdGame(g.cfbd_game_id, g.home_team, g.away_team, g.start_time_utc, "final", 0, 7) for g in games
+    ]
+
+    await jobs.poll_scores(bot)
+
+    assert sum("KNOCKED OUT" in m for m in bot.announcements) == 8
+    used = json.loads(repository.get_state(conn, "knockout_recent_templates"))
+    assert len(used) == 8 and len(set(used)) == 8  # 8 knockouts, 8 different templates
