@@ -1,9 +1,11 @@
+import asyncio
 import json
 import logging
 import random
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import aiohttp
 import discord
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -388,10 +390,38 @@ async def api_usage_report_job(bot) -> None:
     await bot.announce("\n".join(lines))
 
 
+# Waits between retries of a job that hit a transient network failure - the
+# Pi's connection blips, and CFBD/Discord occasionally time out or 5xx. Only
+# if it's still failing after these does it count as a real failure.
+_TRANSIENT_RETRY_DELAYS_SECONDS = (30, 90)
+
+
+def _is_transient(error: Exception) -> bool:
+    """A network-level hiccup worth retrying rather than a bug: timeouts,
+    DNS/connection failures, and server-side 5xx errors from CFBD, the Odds
+    API or Discord."""
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code >= 500
+    return isinstance(
+        error, (httpx.TransportError, aiohttp.ClientConnectionError, asyncio.TimeoutError, discord.DiscordServerError)
+    )
+
+
 def _guarded(bot, name: str, job):
     async def run():
         try:
-            await job(bot)
+            for delay in _TRANSIENT_RETRY_DELAYS_SECONDS:
+                try:
+                    await job(bot)
+                    return
+                except Exception as error:
+                    if not _is_transient(error):
+                        raise
+                    logger.warning(
+                        "Scheduled job %s hit %s - retrying in %ss", name, type(error).__name__, delay
+                    )
+                    await asyncio.sleep(delay)
+            await job(bot)  # last attempt - anything it raises is a real failure
         except Exception as error:
             logger.exception("Scheduled job %s failed", name)
             # the exception type, not its message: the Pi's journal rotates

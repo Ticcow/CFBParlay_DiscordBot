@@ -852,3 +852,63 @@ async def test_knockout_alerts_dont_repeat_recent_lines(conn):
     assert sum("KNOCKED OUT" in m for m in bot.announcements) == 8
     used = json.loads(repository.get_state(conn, "knockout_recent_templates"))
     assert len(used) == 8 and len(set(used)) == 8  # 8 knockouts, 8 different templates
+
+
+@pytest.fixture
+def no_retry_wait(monkeypatch):
+    monkeypatch.setattr(jobs, "_TRANSIENT_RETRY_DELAYS_SECONDS", (0, 0))
+
+
+async def test_guarded_job_retries_a_network_blip_without_alerting(conn, no_retry_wait):
+    bot = FakeBot(conn)
+    calls = []
+
+    async def flaky_job(_bot):
+        calls.append(1)
+        if len(calls) < 3:
+            raise httpx.ReadTimeout("timed out")
+
+    await jobs._guarded(bot, "flaky_job", flaky_job)()
+
+    assert len(calls) == 3
+    assert bot.announcements == []
+
+
+async def test_guarded_job_alerts_once_a_network_problem_outlasts_the_retries(conn, no_retry_wait):
+    bot = FakeBot(conn)
+    calls = []
+
+    async def down_job(_bot):
+        calls.append(1)
+        raise httpx.ConnectError("no route to host")
+
+    await jobs._guarded(bot, "down_job", down_job)()
+
+    assert len(calls) == 3
+    assert len(bot.announcements) == 1
+    assert "ConnectError" in bot.announcements[0]
+
+
+async def test_guarded_job_alerts_on_a_real_bug_without_retrying(conn, no_retry_wait):
+    bot = FakeBot(conn)
+    calls = []
+
+    async def buggy_job(_bot):
+        calls.append(1)
+        raise KeyError("oops")
+
+    await jobs._guarded(bot, "buggy_job", buggy_job)()
+
+    assert len(calls) == 1
+    assert "KeyError" in bot.announcements[0]
+
+
+def test_is_transient_classifies_errors():
+    request = httpx.Request("GET", "https://api.collegefootballdata.com/games")
+    server_error = httpx.HTTPStatusError("502", request=request, response=httpx.Response(502, request=request))
+    client_error = httpx.HTTPStatusError("401", request=request, response=httpx.Response(401, request=request))
+    assert jobs._is_transient(httpx.ReadTimeout("t"))
+    assert jobs._is_transient(server_error)
+    assert jobs._is_transient(TimeoutError())
+    assert not jobs._is_transient(client_error)  # a bad API key won't fix itself
+    assert not jobs._is_transient(ValueError())
